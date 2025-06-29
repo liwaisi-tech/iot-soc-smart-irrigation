@@ -53,3 +53,12 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# ESP-IDF generated files
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.defaults.*
+managed_components/
+dependencies.lock
+.idf_tools/
