@@ -260,6 +260,77 @@ This project follows hexagonal architecture principles and clean code practices.
 
 The codebase is designed to be maintainable, testable, and scalable for IoT applications in rural Colombian markets.
 
+## Claude Code Development Guidelines
+
+Following [Claude Code Best Practices](https://www.anthropic.com/engineering/claude-code-best-practices), please adhere to these specific requirements for this project:
+
+### Git and Version Control Requirements
+
+1. **GitHub CLI Usage**: 
+   - Always use `gh` command when possible for GitHub operations
+   - Prefer `gh pr create`, `gh issue create`, `gh repo clone` over web interface
+   - Use `gh` for checking PR status, comments, and repository information
+
+2. **Commit Message Standards**:
+   - Always use proper emojis from [Gitmoji](https://gitmoji.dev/) in commit messages
+   - Examples: `:sparkles:` for new features, `:bug:` for bug fixes, `:construction:` for work in progress
+   - Format: `<emoji> <description>` followed by detailed bullet points if needed
+
+3. **Co-Authorship Requirements**:
+   - Always set co-author to `braejan` with email `ing.brayanarias@gmail.com`
+   - Include in commit message: `Co-Authored-By: braejan <ing.brayanarias@gmail.com>`
+   - Also include Claude attribution: `🤖 Generated with [Claude Code](https://claude.ai/code)`
+
+### ESP-IDF Development Requirements
+
+4. **ESP-IDF Environment Setup**:
+   - When `idf.py` command fails, always use `get_idf` alias first to setup environment
+   - Pattern: `get_idf && idf.py <command>`
+   - This ensures proper ESP-IDF environment activation before any operations
+
+### Example Commit Message Format
+
+```
+:construction: implement WiFi connectivity adapter
+
+- Add WiFi initialization and connection handling
+- Implement exponential backoff for reconnection
+- Add proper error handling and logging
+- Follow hexagonal architecture patterns
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: braejan <ing.brayanarias@gmail.com>
+```
+
+### Example GitHub CLI Usage
+
+```bash
+# Create pull request
+gh pr create --title ":sparkles: add sensor data collection" --body "Description here"
+
+# Check PR status
+gh pr status
+
+# Create issue
+gh issue create --title ":bug: memory leak in sensor driver" --body "Issue description"
+```
+
+### Example ESP-IDF Commands
+
+```bash
+# Build project
+get_idf && idf.py build
+
+# Flash to device
+get_idf && idf.py -p /dev/ttyUSB0 flash
+
+# Monitor output
+get_idf && idf.py -p /dev/ttyUSB0 monitor --print-filter="*:V" --timestamps
+```
+
+These guidelines ensure consistency with Claude Code best practices while maintaining the project's specific requirements and development workflow.
+
 ---
 
 **Project Version**: 1.0.0  
