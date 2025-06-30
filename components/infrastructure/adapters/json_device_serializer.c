@@ -1,10 +1,14 @@
 #include "json_device_serializer.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #define MAC_STRING_LENGTH 18  // "AA:BB:CC:DD:EE:FF\0"
 #define IP_STRING_LENGTH 16   // "255.255.255.255\0"
 #define MIN_JSON_BUFFER_SIZE 150
+#define MIN_AMBIENT_JSON_SIZE 80
+#define MIN_SOIL_JSON_SIZE 120
+#define MIN_COMPLETE_JSON_SIZE 250
 
 static bool is_valid_mac(const uint8_t mac_bytes[6]);
 static bool is_valid_ip(uint32_t ip_binary);
@@ -12,6 +16,8 @@ static bool is_valid_device_name(const char* device_name);
 static bool is_valid_crop_name(const char* crop_name);
 static bool is_valid_firmware_version(const char* firmware_version);
 static void escape_json_string(const char* input, char* output, size_t output_size);
+static bool is_valid_sensor_value(float value, float min_range, float max_range);
+static esp_err_t float_to_string(float value, char* str_buffer, size_t buffer_size);
 
 esp_err_t serialize_device_registration(device_info_t* device_info, char* buffer, size_t buffer_size)
 {
@@ -183,4 +189,244 @@ static void escape_json_string(const char* input, char* output, size_t output_si
     }
     
     output[output_pos] = '\0';
+}
+
+static bool is_valid_sensor_value(float value, float min_range, float max_range)
+{
+    if (isnan(value) || isinf(value)) {
+        return false;
+    }
+    if (value == -1.0f) {
+        return false; // Sensor not connected
+    }
+    return (value >= min_range && value <= max_range);
+}
+
+static esp_err_t float_to_string(float value, char* str_buffer, size_t buffer_size)
+{
+    if (str_buffer == NULL || buffer_size < 8) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (isnan(value) || isinf(value)) {
+        int written = snprintf(str_buffer, buffer_size, "null");
+        if (written < 0 || (size_t)written >= buffer_size) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+        return ESP_OK;
+    }
+
+    int written = snprintf(str_buffer, buffer_size, "%.1f", value);
+    if (written < 0 || (size_t)written >= buffer_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t serialize_ambient_sensor_data(ambient_sensor_data_t* ambient_data, char* json_buffer, size_t buffer_size)
+{
+    if (ambient_data == NULL || json_buffer == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (buffer_size < MIN_AMBIENT_JSON_SIZE) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    // Validate sensor ranges
+    if (!is_valid_sensor_value(ambient_data->ambient_temperature, -40.0f, 85.0f) ||
+        !is_valid_sensor_value(ambient_data->ambient_humidity, 0.0f, 100.0f)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char temp_str[16];
+    char hum_str[16];
+
+    esp_err_t ret;
+    ret = float_to_string(ambient_data->ambient_temperature, temp_str, sizeof(temp_str));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    ret = float_to_string(ambient_data->ambient_humidity, hum_str, sizeof(hum_str));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    int written = snprintf(json_buffer, buffer_size,
+        "{"
+        "\"ambient_temperature\":%s,"
+        "\"ambient_humidity\":%s"
+        "}",
+        temp_str, hum_str
+    );
+
+    if (written < 0 || (size_t)written >= buffer_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t serialize_soil_sensor_data(soil_sensor_data_t* soil_data, char* json_buffer, size_t buffer_size)
+{
+    if (soil_data == NULL || json_buffer == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (buffer_size < MIN_SOIL_JSON_SIZE) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    // Check if at least one sensor has valid data
+    bool has_valid_sensor = false;
+    if (is_valid_sensor_value(soil_data->soil_humidity_1, 0.0f, 100.0f) ||
+        is_valid_sensor_value(soil_data->soil_humidity_2, 0.0f, 100.0f) ||
+        is_valid_sensor_value(soil_data->soil_humidity_3, 0.0f, 100.0f) ||
+        isnan(soil_data->soil_humidity_1) || isnan(soil_data->soil_humidity_2) || isnan(soil_data->soil_humidity_3)) {
+        has_valid_sensor = true;
+    }
+
+    if (!has_valid_sensor) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char json_parts[256] = "{";
+    bool first_field = true;
+
+    // Handle soil_humidity_1
+    if (soil_data->soil_humidity_1 != -1.0f) {
+        char soil1_str[16];
+        esp_err_t ret = float_to_string(soil_data->soil_humidity_1, soil1_str, sizeof(soil1_str));
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        if (!first_field) {
+            strcat(json_parts, ",");
+        }
+        strcat(json_parts, "\"soil_humidity_1\":");
+        strcat(json_parts, soil1_str);
+        first_field = false;
+    }
+
+    // Handle soil_humidity_2
+    if (soil_data->soil_humidity_2 != -1.0f) {
+        char soil2_str[16];
+        esp_err_t ret = float_to_string(soil_data->soil_humidity_2, soil2_str, sizeof(soil2_str));
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        if (!first_field) {
+            strcat(json_parts, ",");
+        }
+        strcat(json_parts, "\"soil_humidity_2\":");
+        strcat(json_parts, soil2_str);
+        first_field = false;
+    }
+
+    // Handle soil_humidity_3
+    if (soil_data->soil_humidity_3 != -1.0f) {
+        char soil3_str[16];
+        esp_err_t ret = float_to_string(soil_data->soil_humidity_3, soil3_str, sizeof(soil3_str));
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        if (!first_field) {
+            strcat(json_parts, ",");
+        }
+        strcat(json_parts, "\"soil_humidity_3\":");
+        strcat(json_parts, soil3_str);
+        first_field = false;
+    }
+
+    strcat(json_parts, "}");
+
+    if (strlen(json_parts) >= buffer_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    strcpy(json_buffer, json_parts);
+    return ESP_OK;
+}
+
+esp_err_t serialize_complete_sensor_data(ambient_sensor_data_t* ambient_data, soil_sensor_data_t* soil_data, device_info_t* device_info, char* json_buffer, size_t buffer_size)
+{
+    if (ambient_data == NULL || soil_data == NULL || device_info == NULL || json_buffer == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (buffer_size < MIN_COMPLETE_JSON_SIZE) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    // Validate device info
+    if (!is_valid_mac(device_info->mac_address) || !is_valid_ip(device_info->ip_address)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Validate ambient sensors
+    if (!is_valid_sensor_value(ambient_data->ambient_temperature, -40.0f, 85.0f) ||
+        !is_valid_sensor_value(ambient_data->ambient_humidity, 0.0f, 100.0f)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Get device info strings
+    char mac_string[MAC_STRING_LENGTH];
+    char ip_string[IP_STRING_LENGTH];
+
+    esp_err_t ret = mac_to_string(device_info->mac_address, mac_string, sizeof(mac_string));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    ret = ip_to_string(device_info->ip_address, ip_string, sizeof(ip_string));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    // Get sensor value strings
+    char temp_str[16], hum_str[16];
+    char soil1_str[16], soil2_str[16], soil3_str[16];
+
+    ret = float_to_string(ambient_data->ambient_temperature, temp_str, sizeof(temp_str));
+    if (ret != ESP_OK) return ret;
+
+    ret = float_to_string(ambient_data->ambient_humidity, hum_str, sizeof(hum_str));
+    if (ret != ESP_OK) return ret;
+
+    ret = float_to_string(soil_data->soil_humidity_1, soil1_str, sizeof(soil1_str));
+    if (ret != ESP_OK) return ret;
+
+    ret = float_to_string(soil_data->soil_humidity_2, soil2_str, sizeof(soil2_str));
+    if (ret != ESP_OK) return ret;
+
+    ret = float_to_string(soil_data->soil_humidity_3, soil3_str, sizeof(soil3_str));
+    if (ret != ESP_OK) return ret;
+
+    // Build JSON with all fields (including -1.0f as null for soil sensors)
+    int written = snprintf(json_buffer, buffer_size,
+        "{"
+        "\"event_type\":\"sensor_data\","
+        "\"mac_address\":\"%s\","
+        "\"ip_address\":\"%s\","
+        "\"ambient_temperature\":%s,"
+        "\"ambient_humidity\":%s,"
+        "\"soil_humidity_1\":%s,"
+        "\"soil_humidity_2\":%s,"
+        "\"soil_humidity_3\":%s"
+        "}",
+        mac_string, ip_string,
+        temp_str, hum_str,
+        soil1_str, soil2_str, soil3_str
+    );
+
+    if (written < 0 || (size_t)written >= buffer_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    return ESP_OK;
 }
