@@ -3,10 +3,15 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include <string.h>
+
+#ifndef CONFIG_WIFI_PROV_CONNECTION_MAX_RETRIES
+#define CONFIG_WIFI_PROV_CONNECTION_MAX_RETRIES 5
+#endif
 
 static const char *TAG = "wifi_connection_manager";
 
@@ -94,7 +99,7 @@ esp_err_t wifi_connection_manager_init(void)
     s_wifi_manager.connected = false;
     s_wifi_manager.has_ip = false;
     s_wifi_manager.retry_count = 0;
-    s_wifi_manager.max_retries = 5;
+    s_wifi_manager.max_retries = CONFIG_WIFI_PROV_CONNECTION_MAX_RETRIES;
     
     esp_read_mac(s_wifi_manager.mac_address, ESP_MAC_WIFI_STA);
     

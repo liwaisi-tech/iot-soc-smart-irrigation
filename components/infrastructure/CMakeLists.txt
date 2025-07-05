@@ -1,7 +1,12 @@
-idf_component_register(SRCS
+idf_component_register(SRCS "adapters/json_device_serializer.c"
+                            "adapters/wifi_adapter/src/wifi_adapter.c"
+                            "adapters/wifi_adapter/src/wifi_prov_manager.c"
+                            "adapters/wifi_adapter/src/boot_counter.c"
+                            "adapters/wifi_adapter/src/wifi_connection_manager.c"
                     INCLUDE_DIRS "."
                     "adapters"
+                    "adapters/wifi_adapter/include"
                     "drivers"
                     "network"
                     "persistence"
-                    REQUIRES domain application)
+                    REQUIRES domain application wifi_provisioning protocomm esp_wifi nvs_flash esp_event esp_netif esp_timer)

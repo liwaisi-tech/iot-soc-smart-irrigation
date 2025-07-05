@@ -1,0 +1,70 @@
+menu "WiFi Provisioning Configuration"
+
+    config WIFI_PROV_SECURITY_1_POP
+        string "Proof of Possession for WiFi Provisioning"
+        default "liwaisi2025"
+        help
+            Password/PIN required during WiFi provisioning process.
+            This is used for secure communication during the provisioning
+            phase when users configure WiFi credentials.
+
+    config WIFI_PROV_SOFTAP_SSID
+        string "WiFi Provisioning SoftAP SSID"
+        default "Liwaisi-Config"
+        help
+            Network name shown to users during provisioning.
+            Users will connect to this network to configure their
+            home WiFi credentials.
+
+    config WIFI_PROV_RESET_BOOT_COUNT
+        int "Boot cycles required for provisioning reset"
+        range 3 10
+        default 5
+        help
+            Number of consecutive boot cycles (power on/off) within
+            the time window to trigger provisioning mode reset.
+            This allows users to force the device back into
+            provisioning mode by power cycling.
+
+    config WIFI_PROV_RESET_TIME_WINDOW_MS
+        int "Time window for boot cycle detection (milliseconds)"
+        range 10000 60000
+        default 30000
+        help
+            Time window in milliseconds within which consecutive
+            boot cycles must occur to trigger provisioning reset.
+            Default is 30 seconds.
+
+    config WIFI_PROV_SOFTAP_CHANNEL
+        int "WiFi Provisioning SoftAP Channel"
+        range 1 13
+        default 1
+        help
+            WiFi channel for the provisioning SoftAP.
+            Channel 1 is generally safe for most regions.
+
+    config WIFI_PROV_SOFTAP_MAX_STA
+        int "Maximum concurrent connections to provisioning SoftAP"
+        range 1 8
+        default 4
+        help
+            Maximum number of devices that can connect simultaneously
+            to the provisioning SoftAP. Usually 1-2 is sufficient.
+
+    config WIFI_PROV_CONNECTION_MAX_RETRIES
+        int "Maximum WiFi connection retries"
+        range 0 20
+        default 5
+        help
+            Maximum number of connection attempts before giving up.
+            Set to 0 for unlimited retries (not recommended).
+
+    config WIFI_PROV_ENABLE_DEBUG_LOGS
+        bool "Enable verbose WiFi provisioning debug logs"
+        default n
+        help
+            Enable detailed debug logging for WiFi provisioning.
+            This can help with troubleshooting but may increase
+            log verbosity significantly.
+
+endmenu

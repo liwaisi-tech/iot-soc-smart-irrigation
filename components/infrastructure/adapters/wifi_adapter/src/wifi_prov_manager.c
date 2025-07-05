@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_mac.h"
 #include "nvs_flash.h"
 #include "wifi_provisioning/manager.h"
 #include "wifi_provisioning/scheme_softap.h"
@@ -16,9 +17,17 @@ ESP_EVENT_DEFINE_BASE(WIFI_PROV_EVENTS);
 static wifi_prov_manager_t s_prov_manager = {0};
 static bool s_prov_manager_initialized = false;
 
-#define WIFI_PROV_SOFTAP_SSID_DEFAULT "Liwaisi-Config"
+#ifndef CONFIG_WIFI_PROV_SOFTAP_SSID
+#define CONFIG_WIFI_PROV_SOFTAP_SSID "Liwaisi-Config"
+#endif
+
+#ifndef CONFIG_WIFI_PROV_SECURITY_1_POP
+#define CONFIG_WIFI_PROV_SECURITY_1_POP "liwaisi2025"
+#endif
+
+#define WIFI_PROV_SOFTAP_SSID_DEFAULT CONFIG_WIFI_PROV_SOFTAP_SSID
 #define WIFI_PROV_SOFTAP_PASSWORD NULL
-#define WIFI_PROV_SECURITY_POP_DEFAULT "liwaisi2025"
+#define WIFI_PROV_SECURITY_POP_DEFAULT CONFIG_WIFI_PROV_SECURITY_1_POP
 
 static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)

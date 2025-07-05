@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <stdbool.h>
 
 #define MAC_STRING_LENGTH 18  // "AA:BB:CC:DD:EE:FF\0"
 #define IP_STRING_LENGTH 16   // "255.255.255.255\0"

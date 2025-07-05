@@ -1,4 +1,5 @@
-idf_component_register(SRCS "src/wifi_prov_manager.c"
+idf_component_register(SRCS "src/wifi_adapter.c"
+                            "src/wifi_prov_manager.c"
                             "src/boot_counter.c"
                             "src/wifi_connection_manager.c"
                        INCLUDE_DIRS "include"
