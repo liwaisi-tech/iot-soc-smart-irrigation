@@ -69,7 +69,7 @@ static void wifi_adapter_connection_event_handler(void* arg, esp_event_base_t ev
     if (event_base == WIFI_CONNECTION_EVENTS) {
         switch (event_id) {
             case WIFI_CONNECTION_EVENT_CONNECTED:
-                ESP_LOGI(TAG, "WiFi connected successfully");
+                ESP_LOGI(TAG, "WiFi connected successfully to: '%s'", s_adapter_status.ssid);
                 s_adapter_status.connected = true;
                 s_adapter_status.state = WIFI_ADAPTER_STATE_CONNECTED;
                 esp_event_post(WIFI_ADAPTER_EVENTS, WIFI_ADAPTER_EVENT_CONNECTED, NULL, 0, portMAX_DELAY);
