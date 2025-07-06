@@ -69,6 +69,10 @@ esp_err_t wifi_adapter_get_mac(uint8_t *mac);
 
 esp_err_t wifi_adapter_get_ssid(char *ssid, size_t ssid_len);
 
+esp_err_t wifi_adapter_clear_all_credentials(void);
+
+esp_err_t wifi_adapter_check_first_boot_and_clear(void);
+
 #ifdef __cplusplus
 }
 #endif

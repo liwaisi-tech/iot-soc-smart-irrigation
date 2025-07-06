@@ -175,7 +175,15 @@ esp_err_t wifi_connection_manager_connect(const wifi_config_t *config)
     
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
     
-    ESP_ERROR_CHECK(esp_wifi_connect());
+    // Handle potential race condition with WIFI_EVENT_STA_START
+    esp_err_t ret = esp_wifi_connect();
+    if (ret == ESP_ERR_WIFI_CONN) {
+        ESP_LOGW(TAG, "WiFi already connecting, waiting for connection result");
+        return ESP_OK; // Not an error, just a timing issue
+    } else if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start WiFi connection: %s", esp_err_to_name(ret));
+        return ret;
+    }
     
     return ESP_OK;
 }

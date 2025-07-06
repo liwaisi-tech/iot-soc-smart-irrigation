@@ -6,6 +6,7 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -207,45 +208,64 @@ esp_err_t wifi_adapter_check_and_connect(void)
     
     s_adapter_status.state = WIFI_ADAPTER_STATE_CHECKING_PROVISION;
     
+    // Step 1: Handle first boot - clear any factory/test credentials
+    esp_err_t ret = wifi_adapter_check_first_boot_and_clear();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "First boot check failed, continuing anyway: %s", esp_err_to_name(ret));
+    }
+    
+    // Step 2: Check for manual reset pattern (user-requested provisioning)
     bool should_provision = false;
-    esp_err_t ret = boot_counter_check_reset_pattern(&should_provision);
+    ret = boot_counter_check_reset_pattern(&should_provision);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to check reset pattern: %s", esp_err_to_name(ret));
         return ret;
     }
     
     if (should_provision) {
-        ESP_LOGW(TAG, "Reset pattern detected - forcing provisioning mode");
+        ESP_LOGW(TAG, "Reset pattern detected - user requested provisioning mode");
         esp_event_post(WIFI_ADAPTER_EVENTS, WIFI_ADAPTER_EVENT_RESET_REQUESTED, NULL, 0, portMAX_DELAY);
         return wifi_adapter_force_provisioning();
     }
     
+    // Step 3: Check if device has valid stored credentials
     bool provisioned = false;
     ret = wifi_prov_manager_is_provisioned(&provisioned);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to check provisioning status: %s", esp_err_to_name(ret));
-        return ret;
+        ESP_LOGW(TAG, "Cannot determine provisioning status - starting provisioning for safety");
+        return wifi_adapter_force_provisioning();
     }
     
     s_adapter_status.provisioned = provisioned;
     
     if (provisioned) {
-        ESP_LOGI(TAG, "Device is provisioned, attempting to connect");
+        ESP_LOGI(TAG, "Device has stored credentials, attempting to connect");
         s_adapter_status.state = WIFI_ADAPTER_STATE_CONNECTING;
         
+        // Step 4: Validate stored credentials
         wifi_config_t config;
         ret = wifi_prov_manager_get_config(&config);
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to get WiFi config: %s", esp_err_to_name(ret));
-            return ret;
+            ESP_LOGE(TAG, "Failed to get stored WiFi config: %s", esp_err_to_name(ret));
+            ESP_LOGW(TAG, "Invalid stored credentials - starting provisioning");
+            return wifi_adapter_force_provisioning();
         }
         
+        // Validate that we actually have a valid SSID
+        if (strlen((char*)config.sta.ssid) == 0) {
+            ESP_LOGW(TAG, "Empty SSID in stored credentials - starting provisioning");
+            return wifi_adapter_force_provisioning();
+        }
+        
+        ESP_LOGI(TAG, "Connecting to stored WiFi network: '%s' (length: %d)", config.sta.ssid, strlen((char*)config.sta.ssid));
         strncpy(s_adapter_status.ssid, (char *)config.sta.ssid, sizeof(s_adapter_status.ssid) - 1);
         s_adapter_status.ssid[sizeof(s_adapter_status.ssid) - 1] = '\0';
         
         return wifi_connection_manager_connect(&config);
+        
     } else {
-        ESP_LOGI(TAG, "Device not provisioned, starting provisioning");
+        ESP_LOGI(TAG, "No stored credentials found - starting provisioning mode");
         return wifi_adapter_force_provisioning();
     }
 }
@@ -374,4 +394,112 @@ esp_err_t wifi_adapter_get_ssid(char *ssid, size_t ssid_len)
     ssid[ssid_len - 1] = '\0';
     
     return ESP_OK;
+}
+
+esp_err_t wifi_adapter_clear_all_credentials(void)
+{
+    if (!s_adapter_initialized) {
+        ESP_LOGE(TAG, "WiFi adapter not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGI(TAG, "Clearing all stored WiFi credentials");
+    
+    // Stop any ongoing connections
+    wifi_connection_manager_disconnect();
+    wifi_prov_manager_stop();
+    
+    // Clear ESP-IDF provisioning manager credentials
+    esp_err_t ret = wifi_prov_manager_reset_credentials();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset provisioning credentials: %s", esp_err_to_name(ret));
+    }
+    
+    // Clear direct WiFi config stored in default NVS partition
+    nvs_handle_t nvs_handle;
+    ret = nvs_open("nvs.net80211", NVS_READWRITE, &nvs_handle);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Clearing WiFi credentials from NVS");
+        nvs_erase_all(nvs_handle);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    } else {
+        ESP_LOGW(TAG, "Failed to open WiFi NVS partition: %s", esp_err_to_name(ret));
+    }
+    
+    // Clear any potential credentials in main nvs partition
+    ret = nvs_open("nvs", NVS_READWRITE, &nvs_handle);
+    if (ret == ESP_OK) {
+        // Clear potential wifi config entries
+        nvs_erase_key(nvs_handle, "wifi.sta.ssid");
+        nvs_erase_key(nvs_handle, "wifi.sta.password");
+        nvs_erase_key(nvs_handle, "wifi.sta.pmk");
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+    
+    // Reset adapter status
+    s_adapter_status.provisioned = false;
+    s_adapter_status.connected = false;
+    s_adapter_status.has_ip = false;
+    s_adapter_status.state = WIFI_ADAPTER_STATE_UNINITIALIZED;
+    memset(s_adapter_status.ssid, 0, sizeof(s_adapter_status.ssid));
+    
+    ESP_LOGI(TAG, "All WiFi credentials cleared - device will enter provisioning mode on next boot");
+    
+    return ESP_OK;
+}
+
+esp_err_t wifi_adapter_check_first_boot_and_clear(void)
+{
+    ESP_LOGI(TAG, "Checking first boot status");
+    
+    nvs_handle_t nvs_handle;
+    esp_err_t ret = nvs_open("liwaisi_config", NVS_READWRITE, &nvs_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS handle for first boot check: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    uint8_t first_boot_flag = 0;
+    size_t required_size = sizeof(first_boot_flag);
+    ret = nvs_get_blob(nvs_handle, "first_boot_done", &first_boot_flag, &required_size);
+    
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        // First boot detected - clear any existing credentials
+        ESP_LOGI(TAG, "First boot detected - clearing any existing factory/test credentials");
+        nvs_close(nvs_handle);
+        
+        // Clear any existing credentials to ensure clean slate
+        wifi_adapter_clear_all_credentials();
+        
+        // Mark first boot as completed
+        ret = nvs_open("liwaisi_config", NVS_READWRITE, &nvs_handle);
+        if (ret == ESP_OK) {
+            first_boot_flag = 1;
+            ret = nvs_set_blob(nvs_handle, "first_boot_done", &first_boot_flag, sizeof(first_boot_flag));
+            if (ret == ESP_OK) {
+                ret = nvs_commit(nvs_handle);
+                if (ret == ESP_OK) {
+                    ESP_LOGI(TAG, "First boot flag set - future boots will preserve user credentials");
+                } else {
+                    ESP_LOGE(TAG, "Failed to commit first boot flag: %s", esp_err_to_name(ret));
+                }
+            } else {
+                ESP_LOGE(TAG, "Failed to set first boot flag: %s", esp_err_to_name(ret));
+            }
+            nvs_close(nvs_handle);
+        }
+        
+        return ESP_OK;
+    } else if (ret == ESP_OK) {
+        // Not first boot - keep existing credentials
+        ESP_LOGI(TAG, "Not first boot - preserving any existing user credentials");
+        nvs_close(nvs_handle);
+        return ESP_OK;
+    } else {
+        ESP_LOGE(TAG, "Failed to check first boot flag: %s", esp_err_to_name(ret));
+        nvs_close(nvs_handle);
+        return ret;
+    }
 }
