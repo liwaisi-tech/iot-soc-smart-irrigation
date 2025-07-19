@@ -6,18 +6,21 @@
 
 static const char *TAG = "boot_counter";
 
-RTC_DATA_ATTR static boot_counter_t s_boot_counter = {0};
+RTC_DATA_ATTR static boot_counter_t s_boot_counter;
 
 esp_err_t boot_counter_init(void)
 {
     ESP_LOGI(TAG, "Initializing boot counter");
     
     if (s_boot_counter.magic_number != BOOT_COUNTER_MAGIC_NUMBER) {
-        ESP_LOGI(TAG, "Boot counter not initialized, creating new counter");
+        ESP_LOGI(TAG, "Boot counter not initialized (magic: 0x%08lx), creating new counter", s_boot_counter.magic_number);
         s_boot_counter.magic_number = BOOT_COUNTER_MAGIC_NUMBER;
         s_boot_counter.boot_count = 0;
         s_boot_counter.last_boot_time = 0;
         s_boot_counter.first_boot_time = 0;
+    } else {
+        ESP_LOGI(TAG, "Boot counter found in RTC memory (magic: 0x%08lx), current count: %lu", 
+                 s_boot_counter.magic_number, s_boot_counter.boot_count);
     }
     
     ESP_LOGI(TAG, "Boot counter initialized - current count: %lu", s_boot_counter.boot_count);

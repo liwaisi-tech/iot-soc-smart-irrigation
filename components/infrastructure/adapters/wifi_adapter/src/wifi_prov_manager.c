@@ -569,12 +569,33 @@ esp_err_t wifi_prov_manager_is_provisioned(bool *provisioned)
         return ESP_ERR_INVALID_ARG;
     }
     
-    // Check if we have valid WiFi credentials stored
-    *provisioned = s_prov_manager.provisioned && (strlen((char*)s_received_wifi_config.sta.ssid) > 0);
+    // Check ESP-IDF's actual WiFi credential storage instead of just internal state
+    wifi_config_t stored_wifi_cfg;
+    esp_err_t ret = esp_wifi_get_config(WIFI_IF_STA, &stored_wifi_cfg);
     
-    ESP_LOGI(TAG, "Device provisioning status: %s", *provisioned ? "provisioned" : "not provisioned");
-    if (*provisioned) {
-        ESP_LOGI(TAG, "Stored SSID: '%s' (length: %d)", s_received_wifi_config.sta.ssid, strlen((char*)s_received_wifi_config.sta.ssid));
+    if (ret == ESP_OK && strlen((char*)stored_wifi_cfg.sta.ssid) > 0) {
+        // We have valid credentials stored in ESP-IDF's NVS
+        *provisioned = true;
+        
+        // Update internal state to match the stored credentials
+        s_received_wifi_config = stored_wifi_cfg;
+        s_prov_manager.provisioned = true;
+        strncpy(s_prov_manager.ssid, (char*)stored_wifi_cfg.sta.ssid, sizeof(s_prov_manager.ssid) - 1);
+        s_prov_manager.ssid[sizeof(s_prov_manager.ssid) - 1] = '\0';
+        
+        ESP_LOGI(TAG, "Device provisioning status: provisioned (from ESP-IDF storage)");
+        ESP_LOGI(TAG, "Stored SSID: '%s' (length: %d)", stored_wifi_cfg.sta.ssid, strlen((char*)stored_wifi_cfg.sta.ssid));
+    } else {
+        // No valid credentials found in storage
+        *provisioned = false;
+        s_prov_manager.provisioned = false;
+        memset(&s_received_wifi_config, 0, sizeof(s_received_wifi_config));
+        memset(s_prov_manager.ssid, 0, sizeof(s_prov_manager.ssid));
+        
+        ESP_LOGI(TAG, "Device provisioning status: not provisioned (no stored credentials)");
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to get WiFi config from storage: %s", esp_err_to_name(ret));
+        }
     }
     
     return ESP_OK;
