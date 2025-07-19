@@ -224,6 +224,18 @@ esp_err_t wifi_adapter_check_and_connect(void)
     
     if (should_provision) {
         ESP_LOGW(TAG, "Reset pattern detected - user requested provisioning mode");
+        
+        // Clear stored WiFi credentials to ensure clean provisioning
+        ESP_LOGI(TAG, "Clearing stored WiFi credentials due to reset pattern");
+        esp_err_t clear_ret = wifi_adapter_clear_all_credentials();
+        if (clear_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to clear credentials: %s", esp_err_to_name(clear_ret));
+        }
+        
+        // Reset boot counter to prevent repeated triggering
+        ESP_LOGI(TAG, "Resetting boot counter after reset pattern detection");
+        boot_counter_clear();
+        
         esp_event_post(WIFI_ADAPTER_EVENTS, WIFI_ADAPTER_EVENT_RESET_REQUESTED, NULL, 0, portMAX_DELAY);
         return wifi_adapter_force_provisioning();
     }
@@ -466,12 +478,9 @@ esp_err_t wifi_adapter_check_first_boot_and_clear(void)
     ret = nvs_get_blob(nvs_handle, "first_boot_done", &first_boot_flag, &required_size);
     
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        // First boot detected - clear any existing credentials
-        ESP_LOGI(TAG, "First boot detected - clearing any existing factory/test credentials");
+        // First boot detected - but preserve any existing user credentials
+        ESP_LOGI(TAG, "First boot detected - preserving any existing user credentials");
         nvs_close(nvs_handle);
-        
-        // Clear any existing credentials to ensure clean slate
-        wifi_adapter_clear_all_credentials();
         
         // Mark first boot as completed
         ret = nvs_open("liwaisi_config", NVS_READWRITE, &nvs_handle);
