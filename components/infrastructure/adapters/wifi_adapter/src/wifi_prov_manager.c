@@ -1,6 +1,7 @@
 #include "wifi_prov_manager.h"
 #include "boot_counter.h"
 #include "wifi_connection_manager.h"
+#include "device_config_service.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -34,7 +35,7 @@ static esp_netif_t *s_ap_netif = NULL;
 // HTML webpage for WiFi configuration
 static const char html_page[] = 
 "<!DOCTYPE html>"
-"<html><head><title>Liwaisi WiFi Setup</title>"
+"<html><head><title>Configura tu dispositivo Liwaisi</title>"
 "<meta charset='UTF-8'>"
 "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
 "<style>"
@@ -43,7 +44,7 @@ static const char html_page[] =
 "h1{color:#2c3e50;text-align:center;margin-bottom:30px;}"
 ".form-group{margin-bottom:20px;}"
 "label{display:block;margin-bottom:5px;font-weight:bold;color:#34495e;}"
-"input,select{width:100%;padding:10px;border:1px solid #ddd;border-radius:5px;font-size:16px;box-sizing:border-box;}"
+"input,select,textarea{width:100%;padding:10px;border:1px solid #ddd;border-radius:5px;font-size:16px;box-sizing:border-box;resize:vertical;}"
 "button{width:100%;background:#3498db;color:white;padding:12px;border:none;border-radius:5px;font-size:16px;cursor:pointer;margin-top:10px;}"
 "button:hover{background:#2980b9;}"
 ".scan-btn{background:#27ae60;margin-bottom:10px;}"
@@ -57,28 +58,36 @@ static const char html_page[] =
 ".info{background:#d1ecf1;color:#0c5460;border:1px solid #bee5eb;}"
 "</style></head><body>"
 "<div class='container'>"
-"<h1>🌱 Liwaisi Smart Irrigation</h1>"
-"<h2>WiFi Configuration</h2>"
+"<h1>🌱 Configura tu dispositivo Liwaisi</h1>"
+"<h2>Configuración del dispositivo</h2>"
 "<div class='form-group'>"
-"<button class='scan-btn' onclick='scanNetworks()'>🔍 Scan WiFi Networks</button>"
+"<button class='scan-btn' onclick='scanNetworks()'>🔍 Escanear redes WiFi</button>"
 "<div id='networks'></div>"
 "</div>"
 "<form id='wifiForm'>"
 "<div class='form-group'>"
-"<label for='ssid'>Network Name (SSID):</label>"
+"<label for='device_name'>Nombre del dispositivo:</label>"
+"<input type='text' id='device_name' name='device_name' maxlength='50' value='Liwaisi Smart Irrigation' required>"
+"</div>"
+"<div class='form-group'>"
+"<label for='device_location'>Ubicación del dispositivo:</label>"
+"<textarea id='device_location' name='device_location' maxlength='150' rows='3' placeholder='Describe la ubicación donde se instala este dispositivo...' required></textarea>"
+"</div>"
+"<div class='form-group'>"
+"<label for='ssid'>Nombre de la red (SSID):</label>"
 "<input type='text' id='ssid' name='ssid' required>"
 "</div>"
 "<div class='form-group'>"
-"<label for='password'>Password:</label>"
+"<label for='password'>Contraseña:</label>"
 "<input type='password' id='password' name='password'>"
 "</div>"
-"<button type='submit'>🔗 Connect WiFi</button>"
+"<button type='submit'>💾 Guardar configuración</button>"
 "</form>"
 "<div id='status'></div>"
 "</div>"
 "<script>"
 "function scanNetworks(){"
-"document.getElementById('status').innerHTML='<div class=\"info\">Scanning networks...</div>';"
+"document.getElementById('status').innerHTML='<div class=\"info\">Escaneando redes...</div>';"
 "fetch('/scan').then(r=>r.json()).then(data=>{"
 "let html='';"
 "data.networks.forEach(net=>{"
@@ -86,9 +95,9 @@ static const char html_page[] =
 "html+=`📶 ${net.ssid} ${net.auth!='open'?'🔒':''}</div>`;"
 "});"
 "document.getElementById('networks').innerHTML=html;"
-"document.getElementById('status').innerHTML='<div class=\"success\">Found '+data.networks.length+' networks</div>';"
+"document.getElementById('status').innerHTML='<div class=\"success\">Encontradas '+data.networks.length+' redes</div>';"
 "}).catch(e=>{"
-"document.getElementById('status').innerHTML='<div class=\"error\">Scan failed</div>';"
+"document.getElementById('status').innerHTML='<div class=\"error\">Escaneo fallido</div>';"
 "});}"
 "function selectNetwork(ssid,auth){"
 "document.getElementById('ssid').value=ssid;"
@@ -96,20 +105,25 @@ static const char html_page[] =
 "}"
 "document.getElementById('wifiForm').onsubmit=function(e){"
 "e.preventDefault();"
+"let deviceName=document.getElementById('device_name').value;"
+"let deviceLocation=document.getElementById('device_location').value;"
 "let ssid=document.getElementById('ssid').value;"
 "let password=document.getElementById('password').value;"
+"if(!deviceName){alert('Please enter device name');return;}"
+"if(!deviceLocation){alert('Please enter device location');return;}"
 "if(!ssid){alert('Please enter network name');return;}"
-"document.getElementById('status').innerHTML='<div class=\"info\">Connecting to '+ssid+'...</div>';"
-"fetch('/connect',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'ssid='+encodeURIComponent(ssid)+'&password='+encodeURIComponent(password)})"
+"document.getElementById('status').innerHTML='<div class=\"info\">Saving configuration...</div>';"
+"let formData='device_name='+encodeURIComponent(deviceName)+'&device_location='+encodeURIComponent(deviceLocation)+'&ssid='+encodeURIComponent(ssid)+'&password='+encodeURIComponent(password);"
+"fetch('/config',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
 ".then(r=>r.json()).then(data=>{"
 "if(data.success){"
-"document.getElementById('status').innerHTML='<div class=\"success\">✅ Connected successfully!<br>Device will restart and connect to your WiFi.</div>';"
+"document.getElementById('status').innerHTML='<div class=\"success\">✅ Configuración guardada con éxito!<br>El dispositivo se reiniciará y se conectará a tu WiFi.</div>';"
 "setTimeout(()=>{window.location.href='/';},3000);"
 "}else{"
-"document.getElementById('status').innerHTML='<div class=\"error\">❌ Connection failed: '+data.message+'</div>';"
+"document.getElementById('status').innerHTML='<div class=\"error\">❌ Configuración fallida: '+data.message+'</div>';"
 "}"
 "}).catch(e=>{"
-"document.getElementById('status').innerHTML='<div class=\"error\">❌ Connection failed</div>';"
+"document.getElementById('status').innerHTML='<div class=\"error\">❌ Configuración fallida</div>';"
 "});}"
 "</script></body></html>";
 
@@ -315,6 +329,206 @@ static esp_err_t connect_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// HTTP handler for device configuration
+static esp_err_t config_post_handler(httpd_req_t *req)
+{
+    char content[1024];
+    size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
+    
+    int ret = httpd_req_recv(req, content, recv_size);
+    if (ret <= 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"success\":false,\"message\":\"Invalid request\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+    
+    content[ret] = '\0';
+    ESP_LOGI(TAG, "Received device configuration: %s", content);
+    
+    // Parse form data
+    char device_name[DEVICE_NAME_MAX_LEN + 1] = {0};
+    char device_location[DEVICE_LOCATION_MAX_LEN + 1] = {0};
+    char ssid[33] = {0};
+    char password[65] = {0};
+    
+    // Parse device_name
+    char *device_name_start = strstr(content, "device_name=");
+    if (device_name_start) {
+        device_name_start += 12; // Skip "device_name="
+        char *device_name_end = strchr(device_name_start, '&');
+        if (device_name_end) {
+            size_t name_len = MIN(device_name_end - device_name_start, DEVICE_NAME_MAX_LEN);
+            strncpy(device_name, device_name_start, name_len);
+        } else {
+            strncpy(device_name, device_name_start, DEVICE_NAME_MAX_LEN);
+        }
+        
+        // URL decode device_name
+        char decoded_name[DEVICE_NAME_MAX_LEN + 1] = {0};
+        int decoded_len = 0;
+        for (int i = 0; device_name[i] && decoded_len < DEVICE_NAME_MAX_LEN; i++) {
+            if (device_name[i] == '+') {
+                decoded_name[decoded_len++] = ' ';
+            } else if (device_name[i] == '%' && device_name[i+1] && device_name[i+2]) {
+                char hex[3] = {device_name[i+1], device_name[i+2], 0};
+                decoded_name[decoded_len++] = (char)strtol(hex, NULL, 16);
+                i += 2;
+            } else {
+                decoded_name[decoded_len++] = device_name[i];
+            }
+        }
+        strcpy(device_name, decoded_name);
+    }
+    
+    // Parse device_location
+    char *device_location_start = strstr(content, "device_location=");
+    if (device_location_start) {
+        device_location_start += 16; // Skip "device_location="
+        char *device_location_end = strchr(device_location_start, '&');
+        if (device_location_end) {
+            size_t location_len = MIN(device_location_end - device_location_start, DEVICE_LOCATION_MAX_LEN);
+            strncpy(device_location, device_location_start, location_len);
+        } else {
+            strncpy(device_location, device_location_start, DEVICE_LOCATION_MAX_LEN);
+        }
+        
+        // URL decode device_location
+        char decoded_location[DEVICE_LOCATION_MAX_LEN + 1] = {0};
+        int decoded_len = 0;
+        for (int i = 0; device_location[i] && decoded_len < DEVICE_LOCATION_MAX_LEN; i++) {
+            if (device_location[i] == '+') {
+                decoded_location[decoded_len++] = ' ';
+            } else if (device_location[i] == '%' && device_location[i+1] && device_location[i+2]) {
+                char hex[3] = {device_location[i+1], device_location[i+2], 0};
+                decoded_location[decoded_len++] = (char)strtol(hex, NULL, 16);
+                i += 2;
+            } else {
+                decoded_location[decoded_len++] = device_location[i];
+            }
+        }
+        strcpy(device_location, decoded_location);
+    }
+    
+    // Parse SSID and password (reuse existing logic)
+    char *ssid_start = strstr(content, "ssid=");
+    char *password_start = strstr(content, "password=");
+    
+    if (ssid_start) {
+        ssid_start += 5; // Skip "ssid="
+        char *ssid_end = strchr(ssid_start, '&');
+        if (ssid_end) {
+            size_t ssid_len = MIN(ssid_end - ssid_start, 32);
+            strncpy(ssid, ssid_start, ssid_len);
+        } else {
+            strncpy(ssid, ssid_start, 32);
+        }
+        
+        // URL decode SSID
+        char decoded_ssid[33] = {0};
+        int decoded_len = 0;
+        for (int i = 0; ssid[i] && decoded_len < 32; i++) {
+            if (ssid[i] == '+') {
+                decoded_ssid[decoded_len++] = ' ';
+            } else if (ssid[i] == '%' && ssid[i+1] && ssid[i+2]) {
+                char hex[3] = {ssid[i+1], ssid[i+2], 0};
+                decoded_ssid[decoded_len++] = (char)strtol(hex, NULL, 16);
+                i += 2;
+            } else {
+                decoded_ssid[decoded_len++] = ssid[i];
+            }
+        }
+        strcpy(ssid, decoded_ssid);
+    }
+    
+    if (password_start) {
+        password_start += 9; // Skip "password="
+        char *password_end = strchr(password_start, '&');
+        if (password_end) {
+            size_t password_len = MIN(password_end - password_start, 64);
+            strncpy(password, password_start, password_len);
+        } else {
+            strncpy(password, password_start, 64);
+        }
+        
+        // URL decode password
+        char decoded_password[65] = {0};
+        int decoded_len = 0;
+        for (int i = 0; password[i] && decoded_len < 64; i++) {
+            if (password[i] == '+') {
+                decoded_password[decoded_len++] = ' ';
+            } else if (password[i] == '%' && password[i+1] && password[i+2]) {
+                char hex[3] = {password[i+1], password[i+2], 0};
+                decoded_password[decoded_len++] = (char)strtol(hex, NULL, 16);
+                i += 2;
+            } else {
+                decoded_password[decoded_len++] = password[i];
+            }
+        }
+        strcpy(password, decoded_password);
+    }
+    
+    // Validate required fields
+    if (strlen(device_name) == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"message\":\"Device name cannot be empty\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    
+    if (strlen(device_location) == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"message\":\"Device location cannot be empty\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    
+    if (strlen(ssid) == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"message\":\"SSID cannot be empty\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    
+    ESP_LOGI(TAG, "Device configuration - Name: '%s', Location: '%s', WiFi: '%s'", 
+             device_name, device_location, ssid);
+    
+    // Save device configuration using the service
+    device_config_t device_config;
+    strncpy(device_config.device_name, device_name, DEVICE_NAME_MAX_LEN);
+    device_config.device_name[DEVICE_NAME_MAX_LEN] = '\0';
+    strncpy(device_config.device_location, device_location, DEVICE_LOCATION_MAX_LEN);
+    device_config.device_location[DEVICE_LOCATION_MAX_LEN] = '\0';
+    
+    esp_err_t config_ret = device_config_service_set_config(&device_config);
+    if (config_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save device configuration: %s", esp_err_to_name(config_ret));
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"message\":\"Failed to save device configuration\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    
+    // Store WiFi configuration
+    memset(&s_received_wifi_config, 0, sizeof(s_received_wifi_config));
+    strncpy((char*)s_received_wifi_config.sta.ssid, ssid, sizeof(s_received_wifi_config.sta.ssid) - 1);
+    strncpy((char*)s_received_wifi_config.sta.password, password, sizeof(s_received_wifi_config.sta.password) - 1);
+    
+    // Update provisioning state
+    s_prov_manager.provisioned = true;
+    s_prov_manager.state = WIFI_PROV_STATE_CONNECTED;
+    strncpy(s_prov_manager.ssid, ssid, sizeof(s_prov_manager.ssid) - 1);
+    
+    // Respond with success
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true,\"message\":\"Configuration saved successfully\"}", HTTPD_RESP_USE_STRLEN);
+    
+    // Post events
+    esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_CREDENTIALS_RECEIVED, &s_received_wifi_config.sta, sizeof(wifi_sta_config_t), portMAX_DELAY);
+    esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_CREDENTIALS_SUCCESS, NULL, 0, portMAX_DELAY);
+    
+    // Delay then post completion event
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_COMPLETED, NULL, 0, portMAX_DELAY);
+    
+    return ESP_OK;
+}
+
 static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
 {
@@ -489,6 +703,14 @@ esp_err_t wifi_prov_manager_start(void)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(s_server, &connect_uri);
+    
+    httpd_uri_t config_uri = {
+        .uri = "/config",
+        .method = HTTP_POST,
+        .handler = config_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(s_server, &config_uri);
     
     s_prov_manager.state = WIFI_PROV_STATE_PROVISIONING;
     s_prov_manager.provisioning_active = true;

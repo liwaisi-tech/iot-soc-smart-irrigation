@@ -14,14 +14,16 @@
 
 // Headers de la aplicación - Arquitectura Hexagonal
 #include "wifi_adapter.h"
+#include "http_adapter.h"
+#include "device_config_service.h"
 // TODO: Uncomment when implementations are created
 // #include "use_cases/device_registration.h"
 // #include "use_cases/read_sensors.h"
 // #include "use_cases/control_irrigation.h"
 // #include "adapters/mqtt_adapter.h"
-// #include "adapters/http_adapter.h"
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
+static bool s_http_adapter_initialized = false;
 
 /**
  * @brief Manejador de eventos WiFi para la aplicación principal
@@ -52,6 +54,18 @@ static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
                 esp_ip4_addr_t ip;
                 if (wifi_adapter_get_ip(&ip) == ESP_OK) {
                     ESP_LOGI(TAG, "Dirección IP obtenida: " IPSTR, IP2STR(&ip));
+                }
+                
+                // Inicializar adaptador HTTP después de obtener IP
+                if (!s_http_adapter_initialized) {
+                    ESP_LOGI(TAG, "Inicializando adaptador HTTP tras conexión WiFi...");
+                    esp_err_t ret = http_adapter_init();
+                    if (ret == ESP_OK) {
+                        s_http_adapter_initialized = true;
+                        ESP_LOGI(TAG, "Adaptador HTTP inicializado correctamente");
+                    } else {
+                        ESP_LOGE(TAG, "Error al inicializar adaptador HTTP: %s", esp_err_to_name(ret));
+                    }
                 }
                 break;
             }
@@ -84,11 +98,11 @@ static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
 void app_main(void)
 {
     ESP_LOGI(TAG, "==============================================");
+    ESP_LOGI(TAG, "Liwaisi Tech - https://liwaisi.tech");
     ESP_LOGI(TAG, "Iniciando Sistema de Riego Inteligente v1.0.0");
-    ESP_LOGI(TAG, "Arquitectura: Hexagonal (Puertos y Adaptadores)");
-    ESP_LOGI(TAG, "Target: ESP32");
     ESP_LOGI(TAG, "Compilado: %s %s", __DATE__, __TIME__);
     ESP_LOGI(TAG, "==============================================");
+
 
     // 1. Inicialización del sistema base ESP-IDF
     ESP_LOGI(TAG, "Inicializando sistema base ESP-IDF...");
@@ -99,6 +113,10 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    // Inicializar servicio de configuración del dispositivo
+    ESP_LOGI(TAG, "Inicializando servicio de configuración del dispositivo...");
+    ESP_ERROR_CHECK(device_config_service_init());
 
     // 2. Inicialización de la capa de infraestructura
     ESP_LOGI(TAG, "Inicializando capa de Infraestructura...");
@@ -124,9 +142,19 @@ void app_main(void)
         }
     }
     
+    // Inicializar adaptador HTTP solo si no estamos en modo de aprovisionamiento
+    wifi_adapter_get_status(&wifi_status);
+    
+    if (wifi_status.provisioned && wifi_status.connected) {
+        ESP_LOGI(TAG, "Inicializando adaptador HTTP...");
+        ESP_ERROR_CHECK(http_adapter_init());
+    } else {
+        ESP_LOGI(TAG, "Saltando inicialización HTTP - modo aprovisionamiento activo");
+        ESP_LOGI(TAG, "El servidor HTTP estará disponible después de la configuración WiFi");
+    }
+    
     // TODO: Implementar inicialización de otros adaptadores
     // mqtt_adapter_init();
-    // http_adapter_init();
 
     // 3. Inicialización de la capa de aplicación (Use Cases)
     ESP_LOGI(TAG, "Inicializando capa de Aplicación...");
