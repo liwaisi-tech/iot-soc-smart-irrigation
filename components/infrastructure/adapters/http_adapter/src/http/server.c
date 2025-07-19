@@ -1,4 +1,5 @@
 #include "server.h"
+#include "endpoints/whoami.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include <string.h>
@@ -7,8 +8,8 @@
 static const char *TAG = "HTTP_SERVER";
 static httpd_handle_t server = NULL;
 
-static esp_err_t whoami_handler(httpd_req_t *req);
 static esp_err_t default_404_handler(httpd_req_t *req, httpd_err_code_t err);
+static esp_err_t register_all_endpoints(void);
 
 esp_err_t http_server_start(void)
 {
@@ -34,24 +35,16 @@ esp_err_t http_server_start(void)
     // Registrar manejador de errores 404
     httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, default_404_handler);
     
-    // Registrar endpoint /whoami
-    httpd_uri_t whoami_uri = {
-        .uri = "/whoami",
-        .method = HTTP_GET,
-        .handler = whoami_handler,
-        .user_ctx = NULL
-    };
-    
-    ret = httpd_register_uri_handler(server, &whoami_uri);
+    // Registrar todos los endpoints
+    ret = register_all_endpoints();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Error al registrar handler /whoami: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Error al registrar endpoints: %s", esp_err_to_name(ret));
         httpd_stop(server);
         server = NULL;
         return ret;
     }
     
     ESP_LOGI(TAG, "Servidor HTTP iniciado correctamente");
-    ESP_LOGI(TAG, "Endpoints disponibles: GET /whoami");
     
     return ESP_OK;
 }
@@ -163,28 +156,21 @@ void http_middleware_log_request(httpd_req_t *req)
     ESP_LOGI("HTTP", "%s %s", method_str, req->uri);
 }
 
-static esp_err_t whoami_handler(httpd_req_t *req)
+static esp_err_t register_all_endpoints(void)
 {
-    http_middleware_log_request(req);
+    esp_err_t ret;
     
-    // Información básica del dispositivo para MVP
-    const char* device_info = "{"
-        "\"device\":{"
-        "\"name\":\"Smart Irrigation System\","
-        "\"version\":\"1.0.0\","
-        "\"architecture\":\"Hexagonal\","
-        "\"target\":\"ESP32\""
-        "},"
-        "\"endpoints\":["
-        "{"
-        "\"path\":\"/whoami\","
-        "\"method\":\"GET\","
-        "\"description\":\"Device information and available endpoints\""
-        "}"
-        "]"
-        "}";
+    // Register whoami endpoint
+    ret = whoami_register_endpoints(server);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register whoami endpoints");
+        return ret;
+    }
     
-    return http_response_send_json(req, device_info);
+    // TODO: Register other endpoints here
+    // e.g., sensors_register_endpoints(server);
+    
+    return ESP_OK;
 }
 
 static esp_err_t default_404_handler(httpd_req_t *req, httpd_err_code_t err)

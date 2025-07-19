@@ -84,11 +84,11 @@ static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
 void app_main(void)
 {
     ESP_LOGI(TAG, "==============================================");
+    ESP_LOGI(TAG, "Liwaisi Tech - https://liwaisi.tech");
     ESP_LOGI(TAG, "Iniciando Sistema de Riego Inteligente v1.0.0");
-    ESP_LOGI(TAG, "Arquitectura: Hexagonal (Puertos y Adaptadores)");
-    ESP_LOGI(TAG, "Target: ESP32");
     ESP_LOGI(TAG, "Compilado: %s %s", __DATE__, __TIME__);
     ESP_LOGI(TAG, "==============================================");
+
 
     // 1. Inicialización del sistema base ESP-IDF
     ESP_LOGI(TAG, "Inicializando sistema base ESP-IDF...");
