@@ -14,12 +14,12 @@
 
 // Headers de la aplicación - Arquitectura Hexagonal
 #include "wifi_adapter.h"
+#include "http_adapter.h"
 // TODO: Uncomment when implementations are created
 // #include "use_cases/device_registration.h"
 // #include "use_cases/read_sensors.h"
 // #include "use_cases/control_irrigation.h"
 // #include "adapters/mqtt_adapter.h"
-// #include "adapters/http_adapter.h"
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
 
@@ -124,9 +124,12 @@ void app_main(void)
         }
     }
     
+    // Inicializar adaptador HTTP
+    ESP_LOGI(TAG, "Inicializando adaptador HTTP...");
+    ESP_ERROR_CHECK(http_adapter_init());
+    
     // TODO: Implementar inicialización de otros adaptadores
     // mqtt_adapter_init();
-    // http_adapter_init();
 
     // 3. Inicialización de la capa de aplicación (Use Cases)
     ESP_LOGI(TAG, "Inicializando capa de Aplicación...");
