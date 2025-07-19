@@ -1,8 +1,10 @@
 #include "whoami.h"
 #include "../server.h"
+#include "../middleware/logging_middleware.h"
 #include "wifi_adapter.h"
 #include "json_device_serializer.h"
 #include "device_info.h"
+#include "device_config_service.h"
 #include "esp_log.h"
 #include <string.h>
 
@@ -36,9 +38,13 @@ static esp_err_t get_device_info(device_info_t *device_info)
         device_info->ip_address = 0; // No IP available
     }
     
-    // Set device information (these could be configurable in the future)
-    strncpy(device_info->device_name, "Smart Irrigation System", sizeof(device_info->device_name) - 1);
-    device_info->device_name[sizeof(device_info->device_name) - 1] = '\0';
+    // Get device name from configuration service
+    ret = device_config_service_get_name(device_info->device_name, sizeof(device_info->device_name));
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to get device name from config: %s", esp_err_to_name(ret));
+        strncpy(device_info->device_name, "Smart Irrigation System", sizeof(device_info->device_name) - 1);
+        device_info->device_name[sizeof(device_info->device_name) - 1] = '\0';
+    }
     
     strncpy(device_info->crop_name, "IoT", sizeof(device_info->crop_name) - 1);
     device_info->crop_name[sizeof(device_info->crop_name) - 1] = '\0';
@@ -51,13 +57,16 @@ static esp_err_t get_device_info(device_info_t *device_info)
 
 esp_err_t whoami_get_handler(httpd_req_t *req)
 {
-    http_middleware_log_request(req);
+    // Initialize request context for enhanced logging
+    http_request_context_t log_context = http_middleware_init_request_context(req);
+    http_middleware_log_request_start(req, &log_context, &HTTP_LOGGING_CONFIG_DEFAULT);
     
     // Get real device information
     device_info_t device_info;
     esp_err_t ret = get_device_info(&device_info);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to get device info: %s", esp_err_to_name(ret));
+        http_middleware_log_request_end(req, &log_context, 500, &HTTP_LOGGING_CONFIG_DEFAULT);
         return http_response_send_error(req, 500, "Internal Server Error", "Failed to retrieve device information");
     }
     
@@ -77,15 +86,23 @@ esp_err_t whoami_get_handler(httpd_req_t *req)
         strncpy(ip_string, "0.0.0.0", sizeof(ip_string));
     }
     
+    // Get device location from configuration service
+    char device_location[DEVICE_LOCATION_MAX_LEN + 1];
+    ret = device_config_service_get_location(device_location, sizeof(device_location));
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to get device location from config: %s", esp_err_to_name(ret));
+        strncpy(device_location, "Not configured", sizeof(device_location) - 1);
+        device_location[sizeof(device_location) - 1] = '\0';
+    }
+    
     // Build JSON response with real device information
-    char response_buffer[512];
+    char response_buffer[768];
     int written = snprintf(response_buffer, sizeof(response_buffer),
         "{"
         "\"device\":{"
         "\"name\":\"%s\","
-        "\"version\": \"%s\","
-        "\"architecture\":\"Hexagonal\","
-        "\"target\":\"ESP32\","
+        "\"location\":\"%s\","
+        "\"version\":\"%s\","
         "\"mac_address\":\"%s\","
         "\"ip_address\":\"%s\","
         "\"crop_name\":\"%s\""
@@ -95,10 +112,16 @@ esp_err_t whoami_get_handler(httpd_req_t *req)
         "\"path\":\"/whoami\","
         "\"method\":\"GET\","
         "\"description\":\"Device information and available endpoints\""
+        "},"
+        "{"
+        "\"path\":\"/config\","
+        "\"method\":\"POST\","
+        "\"description\":\"Save device name, location and WiFi configuration\""
         "}"
         "]"
         "}",
         device_info.device_name,
+        device_location,
         device_info.firmware_version,
         mac_string,
         ip_string,
@@ -107,10 +130,14 @@ esp_err_t whoami_get_handler(httpd_req_t *req)
     
     if (written < 0 || written >= sizeof(response_buffer)) {
         ESP_LOGE(TAG, "JSON response buffer overflow");
+        http_middleware_log_request_end(req, &log_context, 500, &HTTP_LOGGING_CONFIG_DEFAULT);
         return http_response_send_error(req, 500, "Internal Server Error", "Response buffer overflow");
     }
     
-    return http_response_send_json(req, response_buffer);
+    esp_err_t response_ret = http_response_send_json(req, response_buffer);
+    http_middleware_log_request_end(req, &log_context, (response_ret == ESP_OK ? 200 : 500), &HTTP_LOGGING_CONFIG_DEFAULT);
+    
+    return response_ret;
 }
 
 esp_err_t whoami_register_endpoints(httpd_handle_t server)

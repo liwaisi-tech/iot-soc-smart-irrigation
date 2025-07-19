@@ -63,12 +63,6 @@ esp_err_t http_response_send_json(httpd_req_t *req, const char* json_string);
  */
 esp_err_t http_response_send_error(httpd_req_t *req, int status_code, const char* message, const char* description);
 
-/**
- * @brief Log HTTP request for debugging
- * 
- * @param req HTTP request handle
- */
-void http_middleware_log_request(httpd_req_t *req);
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,6 @@
 #include "server.h"
 #include "endpoints/whoami.h"
+#include "middleware/logging_middleware.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include <string.h>
@@ -138,23 +139,6 @@ esp_err_t http_response_send_error(httpd_req_t *req, int status_code, const char
     return http_response_send_json(req, error_json);
 }
 
-void http_middleware_log_request(httpd_req_t *req)
-{
-    if (req == NULL) {
-        return;
-    }
-    
-    const char* method_str = "UNKNOWN";
-    switch (req->method) {
-        case HTTP_GET: method_str = "GET"; break;
-        case HTTP_POST: method_str = "POST"; break;
-        case HTTP_PUT: method_str = "PUT"; break;
-        case HTTP_DELETE: method_str = "DELETE"; break;
-        default: break;
-    }
-    
-    ESP_LOGI("HTTP", "%s %s", method_str, req->uri);
-}
 
 static esp_err_t register_all_endpoints(void)
 {
@@ -175,7 +159,12 @@ static esp_err_t register_all_endpoints(void)
 
 static esp_err_t default_404_handler(httpd_req_t *req, httpd_err_code_t err)
 {
-    http_middleware_log_request(req);
+    // Initialize request context for enhanced logging
+    http_request_context_t log_context = http_middleware_init_request_context(req);
+    http_middleware_log_request_start(req, &log_context, &HTTP_LOGGING_CONFIG_DEFAULT);
     
-    return http_response_send_error(req, 404, "Not Found", "The requested endpoint does not exist");
+    esp_err_t response_ret = http_response_send_error(req, 404, "Not Found", "The requested endpoint does not exist");
+    http_middleware_log_request_end(req, &log_context, 404, &HTTP_LOGGING_CONFIG_DEFAULT);
+    
+    return response_ret;
 }
