@@ -141,7 +141,7 @@ static esp_err_t mqtt_adapter_generate_client_id(void)
     }
     
     snprintf(s_mqtt_connection.config.client_id, sizeof(s_mqtt_connection.config.client_id),
-             "%s_%02X%02X%02X", "ESP32", mac[3], mac[4], mac[5]);
+             "%s_%02X%02X%02X", "liwaisi_sis", mac[3], mac[4], mac[5]);
     
     ESP_LOGI(TAG, "Generated MQTT client ID: %s", s_mqtt_connection.config.client_id);
     return ESP_OK;
@@ -154,7 +154,6 @@ static esp_err_t mqtt_adapter_configure_client(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = s_mqtt_connection.config.broker_uri,
-        .broker.address.transport = MQTT_TRANSPORT_OVER_WS,
         .credentials.client_id = s_mqtt_connection.config.client_id,
         .session.keepalive = s_mqtt_connection.config.keepalive_seconds,
         .session.disable_clean_session = !s_mqtt_connection.config.clean_session,
@@ -247,7 +246,7 @@ esp_err_t mqtt_adapter_init(void)
     s_mqtt_connection.state = MQTT_CONNECTION_STATE_UNINITIALIZED;
     
     // Configure connection parameters
-    strncpy(s_mqtt_connection.config.broker_uri, "ws://mqtt.iot.liwaisi.tech:80/mqtt", 
+    strncpy(s_mqtt_connection.config.broker_uri, "mqtt://192.168.1.198:1883", 
             sizeof(s_mqtt_connection.config.broker_uri) - 1);
     s_mqtt_connection.config.keepalive_seconds = 60;
     s_mqtt_connection.config.qos_level = 1;

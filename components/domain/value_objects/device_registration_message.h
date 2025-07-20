@@ -2,6 +2,7 @@
 #define DOMAIN_VALUE_OBJECTS_DEVICE_REGISTRATION_MESSAGE_H
 
 #include <stdint.h>
+#include "device_config_service.h"
 
 /**
  * @file device_registration_message.h
@@ -12,12 +13,12 @@
  * published to MQTT broker when device comes online.
  * 
  * Technical Specifications - Device Registration Message:
- * - Total memory: ~150 bytes
+ * - Total memory: ~233 bytes
  * - Event type: 16 bytes (fixed "register" string)
  * - MAC address: 18 bytes (string format XX:XX:XX:XX:XX:XX)
  * - Device name: 32 bytes (from NVS configuration)
  * - IP address: 16 bytes (string format XXX.XXX.XXX.XXX)
- * - Location description: 64 bytes (from NVS configuration)
+ * - Location description: 151 bytes (from NVS configuration)
  * 
  * JSON Structure:
  * {
@@ -46,7 +47,7 @@ typedef struct {
     char mac_address[18];             // MAC address in string format (XX:XX:XX:XX:XX:XX)
     char device_name[32];             // Device name from NVS configuration
     char ip_address[16];              // Current IP address in string format
-    char location_description[64];    // Location description from NVS configuration
+    char location_description[DEVICE_LOCATION_MAX_LEN + 1];    // Location description from NVS configuration
 } device_registration_message_t;
 
 /**
