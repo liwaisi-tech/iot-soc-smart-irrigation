@@ -1,0 +1,54 @@
+services:
+  nats-server:
+    image: nats:latest
+    container_name: smart_irrigation_nats
+    ports:
+      # NATS native protocol
+      - "4222:4222"
+      # MQTT protocol
+      - "1883:1883"
+      # WebSocket (for MQTT over WebSockets)
+      - "8080:8080"
+      # HTTP monitoring
+      - "8222:8222"
+    volumes:
+      # Mount configuration file
+      - ./nats-server.conf:/etc/nats/nats-server.conf:ro
+      # Mount data directory for JetStream persistence
+      - nats_data:/tmp/nats
+    command: ["-c", "/etc/nats/nats-server.conf"]
+    restart: unless-stopped
+    networks:
+      - smart_irrigation_network
+    environment:
+      # Set timezone
+      - TZ=America/Bogota
+    healthcheck:
+      test: ["CMD", "nats", "server", "check", "--server", "http://localhost:8222"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: NATS CLI for debugging and management
+  nats-cli:
+    image: natsio/nats-box:latest
+    container_name: smart_irrigation_nats_cli
+    depends_on:
+      - nats-server
+    networks:
+      - smart_irrigation_network
+    command: ["sleep", "infinity"]
+    profiles:
+      - tools
+
+volumes:
+  nats_data:
+    driver: local
+
+networks:
+  smart_irrigation_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

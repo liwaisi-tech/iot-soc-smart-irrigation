@@ -62,3 +62,7 @@ sdkconfig.defaults.*
 managed_components/
 dependencies.lock
 .idf_tools/
+
+.vscode
+.vscode/*
+
