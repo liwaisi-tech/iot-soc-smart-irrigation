@@ -20,7 +20,7 @@
 // #include "use_cases/device_registration.h"
 // #include "use_cases/read_sensors.h"
 // #include "use_cases/control_irrigation.h"
-// #include "adapters/mqtt_adapter.h"
+#include "mqtt_adapter.h"
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
 static bool s_http_adapter_initialized = false;
@@ -153,8 +153,9 @@ void app_main(void)
         ESP_LOGI(TAG, "El servidor HTTP estará disponible después de la configuración WiFi");
     }
     
-    // TODO: Implementar inicialización de otros adaptadores
-    // mqtt_adapter_init();
+    // Inicializar adaptador MQTT después de HTTP
+    ESP_LOGI(TAG, "Inicializando adaptador MQTT...");
+    ESP_ERROR_CHECK(mqtt_adapter_init());
 
     // 3. Inicialización de la capa de aplicación (Use Cases)
     ESP_LOGI(TAG, "Inicializando capa de Aplicación...");
