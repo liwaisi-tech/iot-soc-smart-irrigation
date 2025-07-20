@@ -16,6 +16,7 @@
 #include "wifi_adapter.h"
 #include "http_adapter.h"
 #include "device_config_service.h"
+#include "shared_resource_manager.h"
 // TODO: Uncomment when implementations are created
 // #include "use_cases/device_registration.h"
 // #include "use_cases/read_sensors.h"
@@ -114,6 +115,10 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    // Inicializar sistema de recursos compartidos
+    ESP_LOGI(TAG, "Inicializando sistema de recursos compartidos...");
+    ESP_ERROR_CHECK(shared_resource_manager_init());
+    
     // Inicializar servicio de configuración del dispositivo
     ESP_LOGI(TAG, "Inicializando servicio de configuración del dispositivo...");
     ESP_ERROR_CHECK(device_config_service_init());

@@ -3,6 +3,7 @@
 #include "device_registration_message.h"
 #include "device_config_service.h"
 #include "wifi_adapter.h"
+#include "shared_resource_manager.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
@@ -429,8 +430,129 @@ esp_err_t mqtt_adapter_publish_device_registration(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    // This function will be implemented in the next task
-    // For now, return success to maintain compilation
-    ESP_LOGI(TAG, "Device registration publishing - implementation pending");
-    return ESP_OK;
+    ESP_LOGI(TAG, "Publishing device registration message");
+    
+    // Create device registration message
+    device_registration_message_t reg_message = {0};
+    
+    // Set event type
+    strncpy(reg_message.event_type, "register", sizeof(reg_message.event_type) - 1);
+    
+    // Get MAC address
+    uint8_t mac[6];
+    esp_err_t ret = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read MAC address: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    snprintf(reg_message.mac_address, sizeof(reg_message.mac_address),
+             "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
+    // Get device information from NVS (with semaphore protection)
+    esp_err_t nvs_ret = shared_resource_take(SHARED_RESOURCE_NVS, 5000); // 5 second timeout
+    if (nvs_ret == ESP_OK) {
+        // Get device name from NVS
+        ret = device_config_service_get_name(reg_message.device_name, sizeof(reg_message.device_name));
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to get device name from NVS, using default: %s", esp_err_to_name(ret));
+            strncpy(reg_message.device_name, "Smart Irrigation Device", sizeof(reg_message.device_name) - 1);
+        }
+        
+        // Get location description from NVS
+        ret = device_config_service_get_location(reg_message.location_description, sizeof(reg_message.location_description));
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to get location from NVS, using default: %s", esp_err_to_name(ret));
+            strncpy(reg_message.location_description, "Unknown Location", sizeof(reg_message.location_description) - 1);
+        }
+        
+        shared_resource_give(SHARED_RESOURCE_NVS);
+    } else {
+        ESP_LOGW(TAG, "Failed to take NVS semaphore, using default values");
+        strncpy(reg_message.device_name, "Smart Irrigation Device", sizeof(reg_message.device_name) - 1);
+        strncpy(reg_message.location_description, "Unknown Location", sizeof(reg_message.location_description) - 1);
+    }
+    
+    // Get current IP address
+    esp_ip4_addr_t ip;
+    ret = wifi_adapter_get_ip(&ip);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get IP address: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    snprintf(reg_message.ip_address, sizeof(reg_message.ip_address),
+             IPSTR, IP2STR(&ip));
+    
+    // Create JSON payload (with semaphore protection)
+    esp_err_t json_ret = shared_resource_take(SHARED_RESOURCE_JSON, 3000); // 3 second timeout
+    if (json_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to take JSON semaphore: %s", esp_err_to_name(json_ret));
+        return json_ret;
+    }
+    
+    cJSON *json = cJSON_CreateObject();
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to create JSON object");
+        shared_resource_give(SHARED_RESOURCE_JSON);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    cJSON *event_type = cJSON_CreateString(reg_message.event_type);
+    cJSON *mac_address = cJSON_CreateString(reg_message.mac_address);
+    cJSON *device_name = cJSON_CreateString(reg_message.device_name);
+    cJSON *ip_address = cJSON_CreateString(reg_message.ip_address);
+    cJSON *location_description = cJSON_CreateString(reg_message.location_description);
+    
+    if (event_type == NULL || mac_address == NULL || device_name == NULL || 
+        ip_address == NULL || location_description == NULL) {
+        ESP_LOGE(TAG, "Failed to create JSON strings");
+        cJSON_Delete(json);
+        shared_resource_give(SHARED_RESOURCE_JSON);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    cJSON_AddItemToObject(json, "event_type", event_type);
+    cJSON_AddItemToObject(json, "mac_address", mac_address);
+    cJSON_AddItemToObject(json, "device_name", device_name);
+    cJSON_AddItemToObject(json, "ip_address", ip_address);
+    cJSON_AddItemToObject(json, "location_description", location_description);
+    
+    char *json_string = cJSON_Print(json);
+    if (json_string == NULL) {
+        ESP_LOGE(TAG, "Failed to serialize JSON");
+        cJSON_Delete(json);
+        shared_resource_give(SHARED_RESOURCE_JSON);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    // JSON operations complete, release semaphore
+    shared_resource_give(SHARED_RESOURCE_JSON);
+    
+    // Publish to MQTT topic
+    const char *topic = "/liwaisi/iot/smart-irrigation/device/registration";
+    int msg_id = esp_mqtt_client_publish(s_mqtt_connection.mqtt_client_handle,
+                                         topic,
+                                         json_string,
+                                         0, // Let ESP-MQTT calculate length
+                                         s_mqtt_connection.config.qos_level,
+                                         0); // Don't retain
+    
+    if (msg_id == -1) {
+        ESP_LOGE(TAG, "Failed to publish device registration message");
+        ret = ESP_FAIL;
+    } else {
+        ESP_LOGI(TAG, "Device registration message published successfully");
+        ESP_LOGI(TAG, "Topic: %s", topic);
+        ESP_LOGI(TAG, "Message ID: %d", msg_id);
+        ESP_LOGI(TAG, "Payload: %s", json_string);
+        
+        s_mqtt_connection.device_registered = true;
+        esp_event_post(MQTT_ADAPTER_EVENTS, MQTT_ADAPTER_EVENT_DEVICE_REGISTERED, &msg_id, sizeof(int), portMAX_DELAY);
+        ret = ESP_OK;
+    }
+    
+    // Cleanup
+    free(json_string);
+    cJSON_Delete(json);
+    
+    return ret;
 }
