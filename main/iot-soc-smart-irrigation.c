@@ -23,9 +23,49 @@
 // #include "use_cases/read_sensors.h"
 // #include "use_cases/control_irrigation.h"
 #include "mqtt_adapter.h"
+#include "publish_sensor_data.h"
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
 static bool s_http_adapter_initialized = false;
+
+// Task configuration constants
+#define SENSOR_PUBLISH_TASK_STACK_SIZE    4096
+#define SENSOR_PUBLISH_TASK_PRIORITY      5
+#define SENSOR_PUBLISH_INTERVAL_MS        30000  // 30 seconds
+
+/**
+ * @brief Sensor publishing task
+ * 
+ * Periodically reads sensor data and publishes it via MQTT.
+ * Uses vTaskDelayUntil() for precise 30-second intervals.
+ * Handles failures gracefully by continuing the publishing loop.
+ */
+static void sensor_publishing_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "Starting sensor publishing task");
+    
+    TickType_t xLastWakeTime;
+    const TickType_t xFrequency = pdMS_TO_TICKS(SENSOR_PUBLISH_INTERVAL_MS);
+    
+    // Initialize xLastWakeTime with current time
+    xLastWakeTime = xTaskGetTickCount();
+    
+    while (1) {
+        // Wait for the next cycle
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        
+        // Execute the sensor publishing use case
+        esp_err_t ret = publish_sensor_data_use_case();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Sensor publishing use case failed: %s", esp_err_to_name(ret));
+            ESP_LOGW(TAG, "Will continue with next publishing cycle");
+        }
+        
+        // Log memory status periodically
+        ESP_LOGI(TAG, "Sensor publishing cycle completed - Free heap: %" PRIu32 " bytes", 
+                esp_get_free_heap_size());
+    }
+}
 
 /**
  * @brief Manejador de eventos WiFi para la aplicación principal
@@ -180,6 +220,25 @@ void app_main(void)
     // device_registration_init();
     // read_sensors_init();
     // control_irrigation_init();
+    
+    // Crear tarea de publicación de sensores
+    ESP_LOGI(TAG, "Creando tarea de publicación de sensores...");
+    BaseType_t task_ret = xTaskCreatePinnedToCore(
+        sensor_publishing_task,                 // Task function
+        "sensor_publish",                       // Task name
+        SENSOR_PUBLISH_TASK_STACK_SIZE,        // Stack size
+        NULL,                                   // Task parameters
+        SENSOR_PUBLISH_TASK_PRIORITY,          // Task priority
+        NULL,                                   // Task handle
+        0                                       // Core 0
+    );
+    
+    if (task_ret != pdPASS) {
+        ESP_LOGE(TAG, "Error al crear tarea de publicación de sensores");
+        ESP_ERROR_CHECK(ESP_FAIL); // This will cause a restart
+    } else {
+        ESP_LOGI(TAG, "Tarea de publicación de sensores creada correctamente");
+    }
 
     // 4. Mensaje de inicialización completa
     ESP_LOGI(TAG, "==============================================");
