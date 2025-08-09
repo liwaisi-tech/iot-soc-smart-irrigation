@@ -248,15 +248,6 @@ esp_err_t dht_sensor_read(ambient_sensor_data_t* data)
     data->ambient_humidity = humidity_raw / 10.0f;
     data->ambient_temperature = temperature_raw / 10.0f;
     
-    // Validate ranges
-    if (data->ambient_temperature < -40.0f || data->ambient_temperature > 85.0f) {
-        ESP_LOGW(TAG, "Temperature out of range: %.1f°C", data->ambient_temperature);
-    }
-    
-    if (data->ambient_humidity < 0.0f || data->ambient_humidity > 100.0f) {
-        ESP_LOGW(TAG, "Humidity out of range: %.1f%%", data->ambient_humidity);
-    }
-    
     ESP_LOGD(TAG, "Sensor reading: T=%.1f°C, H=%.1f%%", 
              data->ambient_temperature, data->ambient_humidity);
     

@@ -25,19 +25,6 @@ esp_err_t publish_sensor_data_use_case(void)
         return ESP_OK; // Return OK to continue task execution
     }
     
-    // Validate sensor readings (basic sanity checks)
-    if (sensor_data.ambient_temperature < -40.0f || sensor_data.ambient_temperature > 85.0f) {
-        ESP_LOGW(TAG, "Temperature reading out of range: %.2f°C", sensor_data.ambient_temperature);
-        ESP_LOGW(TAG, "Skipping sensor data publishing due to invalid temperature");
-        return ESP_OK; // Return OK to continue task execution
-    }
-    
-    if (sensor_data.ambient_humidity < 0.0f || sensor_data.ambient_humidity > 100.0f) {
-        ESP_LOGW(TAG, "Humidity reading out of range: %.1f%%", sensor_data.ambient_humidity);
-        ESP_LOGW(TAG, "Skipping sensor data publishing due to invalid humidity");
-        return ESP_OK; // Return OK to continue task execution
-    }
-    
     ESP_LOGI(TAG, "Sensor readings - Temperature: %.2f°C, Humidity: %.1f%%", 
              sensor_data.ambient_temperature, sensor_data.ambient_humidity);
     
