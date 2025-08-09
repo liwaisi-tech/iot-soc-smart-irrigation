@@ -3,7 +3,6 @@
 #include "../middleware/logging_middleware.h"
 #include "shared_resource_manager.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 
 static const char *TAG = "TEMP_HUMIDITY_ENDPOINT";
 
@@ -15,9 +14,6 @@ esp_err_t temperature_humidity_get_handler(httpd_req_t *req)
     
     ESP_LOGI(TAG, "Processing temperature and humidity request");
     
-    // Get current timestamp in milliseconds since epoch
-    int64_t timestamp_us = esp_timer_get_time();
-    int64_t timestamp_ms = timestamp_us / 1000;
     
     // Read sensor data using thread-safe function
     ambient_sensor_data_t sensor_data;
@@ -55,7 +51,6 @@ esp_err_t temperature_humidity_get_handler(httpd_req_t *req)
         // Create error JSON response
         written = snprintf(response_buffer, sizeof(response_buffer),
             "{"
-            "\"timestamp\":%lld,"
             "\"status\":\"error\","
             "\"error\":{"
             "\"message\":\"%s\","
@@ -63,7 +58,6 @@ esp_err_t temperature_humidity_get_handler(httpd_req_t *req)
             "\"code\":\"%s\""
             "}"
             "}",
-            timestamp_ms,
             error_message,
             error_description,
             esp_err_to_name(ret)
@@ -86,12 +80,10 @@ esp_err_t temperature_humidity_get_handler(httpd_req_t *req)
     // Create successful JSON response
     written = snprintf(response_buffer, sizeof(response_buffer),
         "{"
-        "\"timestamp\":%lld,"
         "\"temperature\":%.1f,"
         "\"humidity\":%.1f,"
         "\"status\":\"success\""
         "}",
-        timestamp_ms,
         sensor_data.ambient_temperature,
         sensor_data.ambient_humidity
     );
