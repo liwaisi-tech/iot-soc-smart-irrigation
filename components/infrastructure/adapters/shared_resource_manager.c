@@ -1,5 +1,6 @@
 #include "shared_resource_manager.h"
 #include "esp_log.h"
+#include "dht_sensor.h"
 #include <string.h>
 
 static const char *TAG = "shared_resource_manager";
@@ -10,7 +11,8 @@ static bool s_manager_initialized = false;
 static const char *s_resource_names[] = {
     "NVS",
     "NETWORK", 
-    "JSON"
+    "JSON",
+    "SENSORS"
 };
 
 esp_err_t shared_resource_manager_init(void)
@@ -133,4 +135,55 @@ esp_err_t shared_resource_give(shared_resource_type_t resource_type)
 bool shared_resource_manager_is_initialized(void)
 {
     return s_manager_initialized;
+}
+
+esp_err_t sensor_read_safe(ambient_sensor_data_t* data)
+{
+    if (data == NULL) {
+        ESP_LOGE(TAG, "Data pointer is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (!s_manager_initialized) {
+        ESP_LOGE(TAG, "Shared resource manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (!dht_sensor_is_initialized()) {
+        ESP_LOGE(TAG, "DHT sensor not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGD(TAG, "Acquiring sensor semaphore for safe reading");
+    
+    // Take sensor semaphore with 5-second timeout
+    esp_err_t ret = shared_resource_take(SHARED_RESOURCE_SENSORS, 5000);
+    if (ret != ESP_OK) {
+        if (ret == ESP_ERR_TIMEOUT) {
+            ESP_LOGW(TAG, "Timeout acquiring sensor semaphore");
+        } else {
+            ESP_LOGE(TAG, "Failed to acquire sensor semaphore: %s", esp_err_to_name(ret));
+        }
+        return ret;
+    }
+    
+    // Read sensor data
+    ESP_LOGD(TAG, "Reading sensor data");
+    ret = dht_sensor_read(data);
+    
+    // Release semaphore
+    esp_err_t give_ret = shared_resource_give(SHARED_RESOURCE_SENSORS);
+    if (give_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to release sensor semaphore: %s", esp_err_to_name(give_ret));
+    }
+    
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read sensor data: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    ESP_LOGD(TAG, "Successfully read sensor data: T=%.1f°C, H=%.1f%%", 
+             data->ambient_temperature, data->ambient_humidity);
+    
+    return ESP_OK;
 }

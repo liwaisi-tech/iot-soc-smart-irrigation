@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "esp_event.h"
 #include "mqtt_client.h"
+#include "ambient_sensor_data.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -103,6 +104,17 @@ bool mqtt_adapter_is_connected(void);
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t mqtt_adapter_publish_device_registration(void);
+
+/**
+ * @brief Publish sensor data message
+ * 
+ * Sends ambient sensor data (temperature and humidity) to the sensor data topic.
+ * Creates JSON payload with MAC address, temperature, and humidity values.
+ * 
+ * @param sensor_data Pointer to ambient sensor data structure containing readings
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t mqtt_adapter_publish_sensor_data(const ambient_sensor_data_t *sensor_data);
 
 /**
  * @brief Force reconnection attempt

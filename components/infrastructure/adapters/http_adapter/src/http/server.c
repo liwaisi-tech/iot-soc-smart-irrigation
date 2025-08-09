@@ -1,5 +1,7 @@
 #include "server.h"
 #include "endpoints/whoami.h"
+#include "endpoints/temperature_humidity.h"
+#include "endpoints/ping.h"
 #include "middleware/logging_middleware.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
@@ -148,6 +150,20 @@ static esp_err_t register_all_endpoints(void)
     ret = whoami_register_endpoints(server);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register whoami endpoints");
+        return ret;
+    }
+    
+    // Register temperature-humidity endpoint
+    ret = temperature_humidity_register_endpoints(server);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register temperature-humidity endpoints");
+        return ret;
+    }
+    
+    // Register ping endpoint
+    ret = ping_register_endpoints(server);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register ping endpoints");
         return ret;
     }
     

@@ -555,3 +555,84 @@ esp_err_t mqtt_adapter_publish_device_registration(void)
     
     return ret;
 }
+
+esp_err_t mqtt_adapter_publish_sensor_data(const ambient_sensor_data_t *sensor_data)
+{
+    if (!s_adapter_initialized) {
+        ESP_LOGE(TAG, "MQTT adapter not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (sensor_data == NULL) {
+        ESP_LOGE(TAG, "Sensor data is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (s_mqtt_connection.state != MQTT_CONNECTION_STATE_CONNECTED) {
+        ESP_LOGW(TAG, "MQTT client not connected, skipping sensor data publishing");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGI(TAG, "Publishing sensor data message");
+    
+    // Get MAC address
+    uint8_t mac[6];
+    esp_err_t ret = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read MAC address: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // Create JSON payload (with semaphore protection)
+    esp_err_t json_ret = shared_resource_take(SHARED_RESOURCE_JSON, 3000); // 3 second timeout
+    if (json_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to take JSON semaphore, skipping sensor data publishing: %s", esp_err_to_name(json_ret));
+        return json_ret;
+    }
+    
+    // Use stack-allocated buffer for JSON creation
+    char json_buffer[256];
+    int json_len = snprintf(json_buffer, sizeof(json_buffer),
+                           "{"
+                           "\"event_type\":\"sensor_data\","
+                           "\"mac_address\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
+                           "\"temperature\":%.4f,"
+                           "\"humidity\":%.1f"
+                           "}",
+                           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                           sensor_data->ambient_temperature,
+                           sensor_data->ambient_humidity);
+    
+    // Release JSON semaphore immediately after JSON creation
+    shared_resource_give(SHARED_RESOURCE_JSON);
+    
+    if (json_len >= sizeof(json_buffer)) {
+        ESP_LOGE(TAG, "JSON buffer too small for sensor data");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    if (json_len <= 0) {
+        ESP_LOGE(TAG, "Failed to create JSON payload for sensor data");
+        return ESP_FAIL;
+    }
+    
+    // Publish to MQTT topic
+    const char *topic = "/liwaisi/iot/smart-irrigation/sensors/temperature-and-humidity";
+    int msg_id = esp_mqtt_client_publish(s_mqtt_connection.mqtt_client_handle,
+                                         topic,
+                                         json_buffer,
+                                         json_len,
+                                         s_mqtt_connection.config.qos_level,
+                                         0); // Don't retain
+    
+    if (msg_id == -1) {
+        ESP_LOGE(TAG, "Failed to publish sensor data message");
+        return ESP_FAIL;
+    } else {
+        ESP_LOGI(TAG, "Sensor data message published successfully");
+        ESP_LOGI(TAG, "Topic: %s", topic);
+        ESP_LOGI(TAG, "Message ID: %d", msg_id);
+        ESP_LOGI(TAG, "Payload: %s", json_buffer);
+        return ESP_OK;
+    }
+}
