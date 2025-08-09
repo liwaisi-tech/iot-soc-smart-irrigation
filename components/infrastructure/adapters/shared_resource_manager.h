@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "ambient_sensor_data.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,7 @@ typedef enum {
     SHARED_RESOURCE_NVS,        // NVS access synchronization
     SHARED_RESOURCE_NETWORK,    // Network operations synchronization
     SHARED_RESOURCE_JSON,       // JSON serialization synchronization
+    SHARED_RESOURCE_SENSORS,    // Sensor hardware access synchronization
     SHARED_RESOURCE_MAX
 } shared_resource_type_t;
 
@@ -61,6 +63,19 @@ esp_err_t shared_resource_give(shared_resource_type_t resource_type);
  * @return true if initialized, false otherwise
  */
 bool shared_resource_manager_is_initialized(void);
+
+/**
+ * @brief Thread-safe sensor reading function
+ * 
+ * Acquires the sensor semaphore before reading from DHT sensor
+ * and releases it afterward. Uses 5-second timeout to prevent
+ * blocking indefinitely.
+ * 
+ * @param data Pointer to ambient_sensor_data_t to fill with sensor readings
+ * @return ESP_OK on success, ESP_ERR_TIMEOUT on semaphore timeout,
+ *         ESP_ERR_INVALID_STATE if sensor not initialized, other error codes on failure
+ */
+esp_err_t sensor_read_safe(ambient_sensor_data_t* data);
 
 #ifdef __cplusplus
 }

@@ -96,7 +96,7 @@ esp_err_t whoami_get_handler(httpd_req_t *req)
     }
     
     // Build JSON response with real device information
-    char response_buffer[768];
+    char response_buffer[896];  // Increased to accommodate additional ping endpoint
     int written = snprintf(response_buffer, sizeof(response_buffer),
         "{"
         "\"device\":{"
@@ -114,9 +114,14 @@ esp_err_t whoami_get_handler(httpd_req_t *req)
         "\"description\":\"Device information and available endpoints\""
         "},"
         "{"
-        "\"path\":\"/config\","
-        "\"method\":\"POST\","
-        "\"description\":\"Save device name, location and WiFi configuration\""
+        "\"path\":\"/temperature-and-humidity\","
+        "\"method\":\"GET\","
+        "\"description\":\"Get current temperature and humidity sensor readings\""
+        "},"
+        "{"
+        "\"path\":\"/ping\","
+        "\"method\":\"GET\","
+        "\"description\":\"Simple connectivity check endpoint that responds with 'pong'\""
         "}"
         "]"
         "}",

@@ -17,6 +17,7 @@
 #include "http_adapter.h"
 #include "device_config_service.h"
 #include "shared_resource_manager.h"
+#include "dht_sensor.h"
 // TODO: Uncomment when implementations are created
 // #include "use_cases/device_registration.h"
 // #include "use_cases/read_sensors.h"
@@ -118,6 +119,16 @@ void app_main(void)
     // Inicializar sistema de recursos compartidos
     ESP_LOGI(TAG, "Inicializando sistema de recursos compartidos...");
     ESP_ERROR_CHECK(shared_resource_manager_init());
+    
+    // Inicializar sensor DHT22 en GPIO_NUM_4
+    ESP_LOGI(TAG, "Inicializando sensor DHT22 en GPIO 4...");
+    ret = dht_sensor_init(GPIO_NUM_4);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al inicializar sensor DHT22: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "El sistema continuará sin sensor de temperatura/humedad");
+    } else {
+        ESP_LOGI(TAG, "Sensor DHT22 inicializado correctamente en GPIO 4");
+    }
     
     // Inicializar servicio de configuración del dispositivo
     ESP_LOGI(TAG, "Inicializando servicio de configuración del dispositivo...");
