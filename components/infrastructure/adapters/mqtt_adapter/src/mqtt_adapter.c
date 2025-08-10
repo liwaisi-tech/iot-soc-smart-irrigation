@@ -6,12 +6,11 @@
 #include "shared_resource_manager.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_netif.h"
 #include "esp_event.h"
 #include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "cJSON.h"
+#include "sdkconfig.h"
 #include <string.h>
 #include <stdio.h>
 #include <inttypes.h>
@@ -46,7 +45,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             s_mqtt_connection.state = MQTT_CONNECTION_STATE_CONNECTED;
             s_mqtt_connection.stats.connect_count++;
             s_mqtt_connection.stats.last_connect_time = esp_timer_get_time() / 1000000; // Convert to seconds
-            s_mqtt_connection.stats.current_retry_delay_ms = 30000; // Reset retry delay to 30 seconds
+            s_mqtt_connection.stats.current_retry_delay_ms = CONFIG_MQTT_RECONNECT_INITIAL_DELAY_MS; // Reset retry delay
             
             // Stop reconnection timer if running
             if (s_reconnect_timer != NULL) {
@@ -141,7 +140,7 @@ static esp_err_t mqtt_adapter_generate_client_id(void)
     }
     
     snprintf(s_mqtt_connection.config.client_id, sizeof(s_mqtt_connection.config.client_id),
-             "%s_%02X%02X%02X", "liwaisi_sis", mac[3], mac[4], mac[5]);
+             "%s_%02X%02X%02X", CONFIG_MQTT_CLIENT_ID_PREFIX, mac[3], mac[4], mac[5]);
     
     ESP_LOGI(TAG, "Generated MQTT client ID: %s", s_mqtt_connection.config.client_id);
     return ESP_OK;
@@ -157,8 +156,8 @@ static esp_err_t mqtt_adapter_configure_client(void)
         .credentials.client_id = s_mqtt_connection.config.client_id,
         .session.keepalive = s_mqtt_connection.config.keepalive_seconds,
         .session.disable_clean_session = !s_mqtt_connection.config.clean_session,
-        .buffer.size = 2048,
-        .task.stack_size = 8192,
+        .buffer.size = CONFIG_MQTT_ADAPTER_BUFFER_SIZE,
+        .task.stack_size = CONFIG_MQTT_ADAPTER_TASK_STACK_SIZE,
     };
     
     s_mqtt_connection.mqtt_client_handle = esp_mqtt_client_init(&mqtt_cfg);
@@ -199,8 +198,8 @@ static void mqtt_reconnect_timer_callback(void* arg)
             
             // Increase retry delay with exponential backoff
             s_mqtt_connection.stats.current_retry_delay_ms *= 2;
-            if (s_mqtt_connection.stats.current_retry_delay_ms > 3600000) { // 1 hour max
-                s_mqtt_connection.stats.current_retry_delay_ms = 3600000;
+            if (s_mqtt_connection.stats.current_retry_delay_ms > CONFIG_MQTT_RECONNECT_MAX_DELAY_MS) {
+                s_mqtt_connection.stats.current_retry_delay_ms = CONFIG_MQTT_RECONNECT_MAX_DELAY_MS;
             }
             
             // Schedule next retry
@@ -246,12 +245,12 @@ esp_err_t mqtt_adapter_init(void)
     s_mqtt_connection.state = MQTT_CONNECTION_STATE_UNINITIALIZED;
     
     // Configure connection parameters
-    strncpy(s_mqtt_connection.config.broker_uri, "mqtt://192.168.1.198:1883", 
+    strncpy(s_mqtt_connection.config.broker_uri, CONFIG_MQTT_BROKER_URI, 
             sizeof(s_mqtt_connection.config.broker_uri) - 1);
-    s_mqtt_connection.config.keepalive_seconds = 60;
-    s_mqtt_connection.config.qos_level = 1;
+    s_mqtt_connection.config.keepalive_seconds = CONFIG_MQTT_KEEPALIVE_SECONDS;
+    s_mqtt_connection.config.qos_level = CONFIG_MQTT_QOS_LEVEL;
     s_mqtt_connection.config.clean_session = true;
-    s_mqtt_connection.stats.current_retry_delay_ms = 30000; // 30 seconds initial delay
+    s_mqtt_connection.stats.current_retry_delay_ms = CONFIG_MQTT_RECONNECT_INITIAL_DELAY_MS;
     
     // Generate client ID
     esp_err_t ret = mqtt_adapter_generate_client_id();
@@ -409,7 +408,7 @@ esp_err_t mqtt_adapter_reconnect(void)
     }
     
     // Reset retry delay
-    s_mqtt_connection.stats.current_retry_delay_ms = 30000; // 30 seconds initial delay
+    s_mqtt_connection.stats.current_retry_delay_ms = CONFIG_MQTT_RECONNECT_INITIAL_DELAY_MS;
     
     // Start reconnection immediately
     mqtt_reconnect_timer_callback(NULL);
@@ -527,7 +526,7 @@ esp_err_t mqtt_adapter_publish_device_registration(void)
     shared_resource_give(SHARED_RESOURCE_JSON);
     
     // Publish to MQTT topic
-    const char *topic = "/liwaisi/iot/smart-irrigation/device/registration";
+    const char *topic = CONFIG_MQTT_REGISTRATION_TOPIC;
     int msg_id = esp_mqtt_client_publish(s_mqtt_connection.mqtt_client_handle,
                                          topic,
                                          json_string,
@@ -617,7 +616,7 @@ esp_err_t mqtt_adapter_publish_sensor_data(const ambient_sensor_data_t *sensor_d
     }
     
     // Publish to MQTT topic
-    const char *topic = "/liwaisi/iot/smart-irrigation/sensors/temperature-and-humidity";
+    const char *topic = CONFIG_MQTT_SENSOR_DATA_TOPIC;
     int msg_id = esp_mqtt_client_publish(s_mqtt_connection.mqtt_client_handle,
                                          topic,
                                          json_buffer,

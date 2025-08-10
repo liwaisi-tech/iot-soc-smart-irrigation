@@ -1,20 +1,27 @@
 menu "MQTT Configuration"
 
     config MQTT_BROKER_URI
-        string "MQTT Broker WebSocket URI"
-        default "ws://mqtt.iot.liwaisi.tech:80/mqtt"
+        string "MQTT Broker URI"
+        default "mqtt://mqtt.liwaisi.tech:1883"
         help
-            WebSocket URI of the MQTT broker (NATS server with MQTT compatibility).
-            Format: ws://hostname:port/path
-            Default connects to Liwaisi's NATS server with MQTT interface.
+            URI of the MQTT broker. Supports multiple protocols:
+            - Standard MQTT: mqtt://hostname:port
+            - MQTT over WebSocket: ws://hostname:port/path
+            - Secure MQTT: mqtts://hostname:port
+            - Secure WebSocket: wss://hostname:port/path
+            
+            Examples:
+            - mqtt://192.168.1.100:1883 (standard MQTT)
+            - ws://mqtt.iot.liwaisi.tech:80/mqtt (WebSocket MQTT)
+            - mqtts://secure-broker.com:8883 (secure MQTT)
 
     config MQTT_CLIENT_ID_PREFIX
         string "MQTT Client ID Prefix"
-        default "ESP32"
+        default "liwaisi_sis"
         help
             Prefix for MQTT client ID. The full client ID will be:
             <prefix>_<last_3_MAC_bytes>
-            Example: ESP32_A1B2C3
+            Example: liwaisi_sis_A1B2C3
 
     config MQTT_REGISTRATION_TOPIC
         string "Device Registration Topic"
@@ -23,6 +30,14 @@ menu "MQTT Configuration"
             MQTT topic for publishing device registration messages.
             This topic is used when the device connects to announce
             its presence and current network information.
+
+    config MQTT_SENSOR_DATA_TOPIC
+        string "Sensor Data Topic"
+        default "/liwaisi/iot/smart-irrigation/sensors/temperature-and-humidity"
+        help
+            MQTT topic for publishing sensor data messages.
+            This topic is used to send temperature and humidity
+            sensor readings to the IoT platform.
 
     config MQTT_KEEPALIVE_SECONDS
         int "MQTT Keep Alive Interval (seconds)"
@@ -67,16 +82,16 @@ menu "MQTT Configuration"
             This can help with troubleshooting but may increase
             log verbosity significantly.
 
-    config MQTT_TASK_STACK_SIZE
-        int "MQTT Task Stack Size (bytes)"
+    config MQTT_ADAPTER_TASK_STACK_SIZE
+        int "MQTT Adapter Task Stack Size (bytes)"
         range 4096 16384
         default 8192
         help
             Stack size for MQTT client task. Increase if you
             encounter stack overflow issues.
 
-    config MQTT_BUFFER_SIZE
-        int "MQTT Buffer Size (bytes)"
+    config MQTT_ADAPTER_BUFFER_SIZE
+        int "MQTT Adapter Buffer Size (bytes)"
         range 1024 8192
         default 2048
         help
