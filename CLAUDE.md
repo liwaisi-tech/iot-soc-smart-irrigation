@@ -515,6 +515,8 @@ if (free_heap < 50000) {  // 50KB threshold
 
 ### Debug Tools & Commands
 ```bash
+# Acitviar framework idf
+get_idf
 # Real-time monitoring with sensor data
 idf.py monitor --print_filter="*:I sensor_*:D irrigation_*:D"
 
@@ -600,6 +602,7 @@ cd iot-soc-smart-irrigation
 idf.py menuconfig
 
 # 4. Build and flash
+Get_idf
 idf.py build flash monitor
 ```
 
