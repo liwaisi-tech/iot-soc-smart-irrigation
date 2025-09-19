@@ -30,40 +30,49 @@ static bool s_http_adapter_initialized = false;
 
 // Task configuration constants
 #define SENSOR_PUBLISH_TASK_STACK_SIZE    4096
-#define SENSOR_PUBLISH_TASK_PRIORITY      5
+#define SENSOR_PUBLISH_TASK_PRIORITY      3  // Reduced from 5 to 3 - avoid priority inversion with HTTP/WiFi tasks
 #define SENSOR_PUBLISH_INTERVAL_MS        30000  // 30 seconds
 
 /**
  * @brief Sensor publishing task
- * 
+ *
  * Periodically reads sensor data and publishes it via MQTT.
  * Uses vTaskDelayUntil() for precise 30-second intervals.
  * Handles failures gracefully by continuing the publishing loop.
+ * Implements anti-deadlock measures for WiFi provisioning compatibility.
  */
 static void sensor_publishing_task(void *pvParameters)
 {
-    ESP_LOGI(TAG, "Starting sensor publishing task");
-    
+    ESP_LOGI(TAG, "Starting sensor publishing task (Core 1, Priority 3)");
+
     TickType_t xLastWakeTime;
     const TickType_t xFrequency = pdMS_TO_TICKS(SENSOR_PUBLISH_INTERVAL_MS);
-    
+    uint32_t cycle_count = 0;
+
     // Initialize xLastWakeTime with current time
     xLastWakeTime = xTaskGetTickCount();
-    
+
     while (1) {
         // Wait for the next cycle
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
-        
+
+        cycle_count++;
+
         // Execute the sensor publishing use case
         esp_err_t ret = publish_sensor_data_use_case();
         if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "Sensor publishing use case failed: %s", esp_err_to_name(ret));
-            ESP_LOGW(TAG, "Will continue with next publishing cycle");
+            // Reduced logging frequency to avoid deadlocks during WiFi provisioning
+            if (cycle_count % 10 == 0) {  // Log only every 10th cycle if errors persist
+                ESP_LOGW(TAG, "Sensor cycle %" PRIu32 " failed: %s",
+                         cycle_count, esp_err_to_name(ret));
+            }
         }
-        
-        // Log memory status periodically
-        ESP_LOGI(TAG, "Sensor publishing cycle completed - Free heap: %" PRIu32 " bytes", 
-                esp_get_free_heap_size());
+
+        // Log memory status less frequently to reduce logging contention
+        if (cycle_count % 5 == 0) {  // Log every 5th cycle (every 2.5 minutes)
+            ESP_LOGI(TAG, "Sensor cycle %" PRIu32 " completed - Free heap: %" PRIu32 " bytes",
+                    cycle_count, esp_get_free_heap_size());
+        }
     }
 }
 
@@ -86,6 +95,20 @@ static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
                 
             case WIFI_ADAPTER_EVENT_PROVISIONING_COMPLETED:
                 ESP_LOGI(TAG, "Aprovisionamiento WiFi completado");
+
+                // NOW it's safe to initialize HTTP adapter after provisioning is complete
+                if (!s_http_adapter_initialized) {
+                    ESP_LOGI(TAG, "Inicializando adaptador HTTP tras completar aprovisionamiento...");
+                    // Small delay to ensure provisioning server is fully stopped
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    esp_err_t ret = http_adapter_init();
+                    if (ret == ESP_OK) {
+                        s_http_adapter_initialized = true;
+                        ESP_LOGI(TAG, "Adaptador HTTP inicializado correctamente");
+                    } else {
+                        ESP_LOGE(TAG, "Error al inicializar adaptador HTTP: %s", esp_err_to_name(ret));
+                    }
+                }
                 break;
                 
             case WIFI_ADAPTER_EVENT_CONNECTED:
@@ -96,18 +119,6 @@ static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
                 esp_ip4_addr_t ip;
                 if (wifi_adapter_get_ip(&ip) == ESP_OK) {
                     ESP_LOGI(TAG, "Dirección IP obtenida: " IPSTR, IP2STR(&ip));
-                }
-                
-                // Inicializar adaptador HTTP después de obtener IP
-                if (!s_http_adapter_initialized) {
-                    ESP_LOGI(TAG, "Inicializando adaptador HTTP tras conexión WiFi...");
-                    esp_err_t ret = http_adapter_init();
-                    if (ret == ESP_OK) {
-                        s_http_adapter_initialized = true;
-                        ESP_LOGI(TAG, "Adaptador HTTP inicializado correctamente");
-                    } else {
-                        ESP_LOGE(TAG, "Error al inicializar adaptador HTTP: %s", esp_err_to_name(ret));
-                    }
                 }
                 break;
             }
@@ -198,16 +209,9 @@ void app_main(void)
         }
     }
     
-    // Inicializar adaptador HTTP solo si no estamos en modo de aprovisionamiento
-    wifi_adapter_get_status(&wifi_status);
-    
-    if (wifi_status.provisioned && wifi_status.connected) {
-        ESP_LOGI(TAG, "Inicializando adaptador HTTP...");
-        ESP_ERROR_CHECK(http_adapter_init());
-    } else {
-        ESP_LOGI(TAG, "Saltando inicialización HTTP - modo aprovisionamiento activo");
-        ESP_LOGI(TAG, "El servidor HTTP estará disponible después de la configuración WiFi");
-    }
+    // DO NOT initialize HTTP adapter here - it conflicts with provisioning server
+    // HTTP adapter will be initialized after WiFi connection is established
+    ESP_LOGI(TAG, "HTTP adapter initialization deferred until WiFi connection");
     
     // Inicializar adaptador MQTT después de HTTP
     ESP_LOGI(TAG, "Inicializando adaptador MQTT...");
@@ -228,9 +232,9 @@ void app_main(void)
         "sensor_publish",                       // Task name
         SENSOR_PUBLISH_TASK_STACK_SIZE,        // Stack size
         NULL,                                   // Task parameters
-        SENSOR_PUBLISH_TASK_PRIORITY,          // Task priority
+        SENSOR_PUBLISH_TASK_PRIORITY,          // Task priority (3 - lower than HTTP/WiFi)
         NULL,                                   // Task handle
-        0                                       // Core 0
+        1                                       // Core 1 - separate from WiFi provisioning on core 0
     );
     
     if (task_ret != pdPASS) {
