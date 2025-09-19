@@ -29,34 +29,55 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "WiFi station started");
+        ESP_LOGD(TAG, "WiFi station started");
         s_wifi_manager.state = WIFI_CONNECTION_STATE_CONNECTING;
         esp_wifi_connect();
         
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGI(TAG, "WiFi station disconnected");
+        wifi_event_sta_disconnected_t* disconnected = (wifi_event_sta_disconnected_t*) event_data;
         s_wifi_manager.state = WIFI_CONNECTION_STATE_DISCONNECTED;
         s_wifi_manager.connected = false;
         s_wifi_manager.has_ip = false;
-        
+
+        // Log detailed disconnection reason
+        ESP_LOGW(TAG, "WiFi disconnected - reason: %d, SSID: %s", disconnected->reason, disconnected->ssid);
+
+        // Check specific disconnection reasons for credential validation
+        if (disconnected->reason == WIFI_REASON_AUTH_EXPIRE ||
+            disconnected->reason == WIFI_REASON_AUTH_FAIL ||
+            disconnected->reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
+            disconnected->reason == WIFI_REASON_HANDSHAKE_TIMEOUT) {
+            ESP_LOGE(TAG, "WiFi authentication failed - incorrect password");
+            s_wifi_manager.state = WIFI_CONNECTION_STATE_FAILED;
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+            esp_event_post(WIFI_CONNECTION_EVENTS, WIFI_CONNECTION_EVENT_AUTH_FAILED, &disconnected->reason, sizeof(uint8_t), portMAX_DELAY);
+            return;
+        } else if (disconnected->reason == WIFI_REASON_NO_AP_FOUND) {
+            ESP_LOGE(TAG, "WiFi network not found - check SSID");
+            s_wifi_manager.state = WIFI_CONNECTION_STATE_FAILED;
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+            esp_event_post(WIFI_CONNECTION_EVENTS, WIFI_CONNECTION_EVENT_NETWORK_NOT_FOUND, &disconnected->reason, sizeof(uint8_t), portMAX_DELAY);
+            return;
+        }
+
         if (s_wifi_manager.retry_count < s_wifi_manager.max_retries) {
             esp_wifi_connect();
             s_wifi_manager.retry_count++;
-            ESP_LOGI(TAG, "Retry connection (%d/%d)", s_wifi_manager.retry_count, s_wifi_manager.max_retries);
+            ESP_LOGD(TAG, "Retry connection (%d/%d)", s_wifi_manager.retry_count, s_wifi_manager.max_retries);
         } else {
             ESP_LOGE(TAG, "WiFi connection failed after %d retries", s_wifi_manager.max_retries);
             s_wifi_manager.state = WIFI_CONNECTION_STATE_FAILED;
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-            
+
             esp_event_post(WIFI_CONNECTION_EVENTS, WIFI_CONNECTION_EVENT_RETRY_EXHAUSTED, NULL, 0, portMAX_DELAY);
         }
-        
+
         esp_event_post(WIFI_CONNECTION_EVENTS, WIFI_CONNECTION_EVENT_DISCONNECTED, NULL, 0, portMAX_DELAY);
         
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "Connected to WiFi network: '%s'", s_wifi_manager.ssid);
-        ESP_LOGI(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGD(TAG, "Connected to WiFi network: '%s'", s_wifi_manager.ssid);
+        ESP_LOGD(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
         
         s_wifi_manager.state = WIFI_CONNECTION_STATE_CONNECTED;
         s_wifi_manager.connected = true;
@@ -73,7 +94,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
 esp_err_t wifi_connection_manager_init(void)
 {
-    ESP_LOGI(TAG, "Initializing WiFi connection manager");
+    ESP_LOGD(TAG, "Initializing WiFi connection manager");
     
     s_wifi_event_group = xEventGroupCreate();
     if (s_wifi_event_group == NULL) {
@@ -104,13 +125,13 @@ esp_err_t wifi_connection_manager_init(void)
     
     esp_read_mac(s_wifi_manager.mac_address, ESP_MAC_WIFI_STA);
     
-    ESP_LOGI(TAG, "WiFi connection manager initialized successfully");
+    ESP_LOGD(TAG, "WiFi connection manager initialized successfully");
     return ESP_OK;
 }
 
 esp_err_t wifi_connection_manager_start(void)
 {
-    ESP_LOGI(TAG, "Starting WiFi connection manager");
+    ESP_LOGD(TAG, "Starting WiFi connection manager");
     
     ESP_ERROR_CHECK(esp_wifi_start());
     
@@ -121,7 +142,7 @@ esp_err_t wifi_connection_manager_start(void)
 
 esp_err_t wifi_connection_manager_stop(void)
 {
-    ESP_LOGI(TAG, "Stopping WiFi connection manager");
+    ESP_LOGD(TAG, "Stopping WiFi connection manager");
     
     ESP_ERROR_CHECK(esp_wifi_stop());
     
@@ -135,7 +156,7 @@ esp_err_t wifi_connection_manager_stop(void)
 
 esp_err_t wifi_connection_manager_deinit(void)
 {
-    ESP_LOGI(TAG, "Deinitializing WiFi connection manager");
+    ESP_LOGD(TAG, "Deinitializing WiFi connection manager");
     
     wifi_connection_manager_stop();
     
@@ -164,7 +185,7 @@ esp_err_t wifi_connection_manager_connect(const wifi_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
     
-    ESP_LOGI(TAG, "Connecting to WiFi network: %s", config->sta.ssid);
+    ESP_LOGD(TAG, "Connecting to WiFi network: %s", config->sta.ssid);
     
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, (wifi_config_t *)config));
     
@@ -191,7 +212,7 @@ esp_err_t wifi_connection_manager_connect(const wifi_config_t *config)
 
 esp_err_t wifi_connection_manager_disconnect(void)
 {
-    ESP_LOGI(TAG, "Disconnecting from WiFi");
+    ESP_LOGD(TAG, "Disconnecting from WiFi");
     
     ESP_ERROR_CHECK(esp_wifi_disconnect());
     
@@ -206,7 +227,7 @@ esp_err_t wifi_connection_manager_disconnect(void)
 
 esp_err_t wifi_connection_manager_reconnect(void)
 {
-    ESP_LOGI(TAG, "Reconnecting to WiFi");
+    ESP_LOGD(TAG, "Reconnecting to WiFi");
     
     s_wifi_manager.retry_count = 0;
     ESP_ERROR_CHECK(esp_wifi_connect());
@@ -277,7 +298,7 @@ esp_err_t wifi_connection_manager_set_retry_config(int max_retries)
     }
     
     s_wifi_manager.max_retries = max_retries;
-    ESP_LOGI(TAG, "Max retries set to: %d", max_retries);
+    ESP_LOGD(TAG, "Max retries set to: %d", max_retries);
     
     return ESP_OK;
 }

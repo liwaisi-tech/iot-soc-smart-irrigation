@@ -24,17 +24,17 @@ static void wifi_adapter_provisioning_event_handler(void* arg, esp_event_base_t 
     if (event_base == WIFI_PROV_EVENTS) {
         switch (event_id) {
             case WIFI_PROV_EVENT_STARTED:
-                ESP_LOGI(TAG, "WiFi provisioning started");
+                ESP_LOGD(TAG, "WiFi provisioning started");
                 s_adapter_status.state = WIFI_ADAPTER_STATE_PROVISIONING;
                 esp_event_post(WIFI_ADAPTER_EVENTS, WIFI_ADAPTER_EVENT_PROVISIONING_STARTED, NULL, 0, portMAX_DELAY);
                 break;
                 
             case WIFI_PROV_EVENT_CREDENTIALS_SUCCESS:
-                ESP_LOGI(TAG, "WiFi credentials validated successfully");
+                ESP_LOGD(TAG, "WiFi credentials validated successfully");
                 break;
                 
             case WIFI_PROV_EVENT_COMPLETED:
-                ESP_LOGI(TAG, "WiFi provisioning completed");
+                ESP_LOGD(TAG, "WiFi provisioning completed");
                 s_adapter_status.provisioned = true;
                 s_adapter_status.state = WIFI_ADAPTER_STATE_CONNECTING;
                 
@@ -45,7 +45,7 @@ static void wifi_adapter_provisioning_event_handler(void* arg, esp_event_base_t 
                     
                     wifi_prov_manager_deinit();
                     
-                    ESP_LOGI(TAG, "Starting WiFi connection with provisioned credentials");
+                    ESP_LOGD(TAG, "Starting WiFi connection with provisioned credentials");
                     wifi_connection_manager_connect(&config);
                 }
                 
@@ -69,14 +69,14 @@ static void wifi_adapter_connection_event_handler(void* arg, esp_event_base_t ev
     if (event_base == WIFI_CONNECTION_EVENTS) {
         switch (event_id) {
             case WIFI_CONNECTION_EVENT_CONNECTED:
-                ESP_LOGI(TAG, "WiFi connected successfully to: '%s'", s_adapter_status.ssid);
+                ESP_LOGD(TAG, "WiFi connected successfully to: '%s'", s_adapter_status.ssid);
                 s_adapter_status.connected = true;
                 s_adapter_status.state = WIFI_ADAPTER_STATE_CONNECTED;
                 esp_event_post(WIFI_ADAPTER_EVENTS, WIFI_ADAPTER_EVENT_CONNECTED, NULL, 0, portMAX_DELAY);
                 break;
                 
             case WIFI_CONNECTION_EVENT_DISCONNECTED:
-                ESP_LOGI(TAG, "WiFi disconnected");
+                ESP_LOGD(TAG, "WiFi disconnected");
                 s_adapter_status.connected = false;
                 s_adapter_status.has_ip = false;
                 s_adapter_status.state = WIFI_ADAPTER_STATE_DISCONNECTED;
@@ -84,12 +84,12 @@ static void wifi_adapter_connection_event_handler(void* arg, esp_event_base_t ev
                 break;
                 
             case WIFI_CONNECTION_EVENT_GOT_IP:
-                ESP_LOGI(TAG, "WiFi got IP address");
+                ESP_LOGD(TAG, "WiFi got IP address");
                 s_adapter_status.has_ip = true;
                 if (event_data != NULL) {
                     esp_ip4_addr_t *ip = (esp_ip4_addr_t *)event_data;
                     s_adapter_status.ip_addr = *ip;
-                    ESP_LOGI(TAG, "IP address: " IPSTR, IP2STR(ip));
+                    ESP_LOGD(TAG, "IP address: " IPSTR, IP2STR(ip));
                 }
                 esp_event_post(WIFI_ADAPTER_EVENTS, WIFI_ADAPTER_EVENT_IP_OBTAINED, event_data, sizeof(esp_ip4_addr_t), portMAX_DELAY);
                 break;
@@ -113,7 +113,7 @@ esp_err_t wifi_adapter_init(void)
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Initializing WiFi adapter");
+    ESP_LOGD(TAG, "Initializing WiFi adapter");
     
     s_adapter_status.state = WIFI_ADAPTER_STATE_UNINITIALIZED;
     s_adapter_status.provisioned = false;
@@ -131,8 +131,8 @@ esp_err_t wifi_adapter_init(void)
     
     s_adapter_initialized = true;
     
-    ESP_LOGI(TAG, "WiFi adapter initialized successfully");
-    ESP_LOGI(TAG, "MAC address: %02x:%02x:%02x:%02x:%02x:%02x",
+    ESP_LOGD(TAG, "WiFi adapter initialized successfully");
+    ESP_LOGD(TAG, "MAC address: %02x:%02x:%02x:%02x:%02x:%02x",
              s_adapter_status.mac_address[0], s_adapter_status.mac_address[1],
              s_adapter_status.mac_address[2], s_adapter_status.mac_address[3],
              s_adapter_status.mac_address[4], s_adapter_status.mac_address[5]);
@@ -149,7 +149,7 @@ esp_err_t wifi_adapter_start(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Starting WiFi adapter");
+    ESP_LOGD(TAG, "Starting WiFi adapter");
     
     ESP_ERROR_CHECK(wifi_connection_manager_start());
     
@@ -163,7 +163,7 @@ esp_err_t wifi_adapter_stop(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Stopping WiFi adapter");
+    ESP_LOGD(TAG, "Stopping WiFi adapter");
     
     wifi_prov_manager_stop();
     wifi_connection_manager_stop();
@@ -182,7 +182,7 @@ esp_err_t wifi_adapter_deinit(void)
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Deinitializing WiFi adapter");
+    ESP_LOGD(TAG, "Deinitializing WiFi adapter");
     
     wifi_adapter_stop();
     
@@ -204,7 +204,7 @@ esp_err_t wifi_adapter_check_and_connect(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Checking WiFi provisioning and connection status");
+    ESP_LOGD(TAG, "Checking WiFi provisioning and connection status");
     
     s_adapter_status.state = WIFI_ADAPTER_STATE_CHECKING_PROVISION;
     
@@ -226,14 +226,14 @@ esp_err_t wifi_adapter_check_and_connect(void)
         ESP_LOGW(TAG, "Reset pattern detected - user requested provisioning mode");
         
         // Clear stored WiFi credentials to ensure clean provisioning
-        ESP_LOGI(TAG, "Clearing stored WiFi credentials due to reset pattern");
+        ESP_LOGD(TAG, "Clearing stored WiFi credentials due to reset pattern");
         esp_err_t clear_ret = wifi_adapter_clear_all_credentials();
         if (clear_ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to clear credentials: %s", esp_err_to_name(clear_ret));
         }
         
         // Reset boot counter to prevent repeated triggering
-        ESP_LOGI(TAG, "Resetting boot counter after reset pattern detection");
+        ESP_LOGD(TAG, "Resetting boot counter after reset pattern detection");
         boot_counter_clear();
         
         esp_event_post(WIFI_ADAPTER_EVENTS, WIFI_ADAPTER_EVENT_RESET_REQUESTED, NULL, 0, portMAX_DELAY);
@@ -252,7 +252,7 @@ esp_err_t wifi_adapter_check_and_connect(void)
     s_adapter_status.provisioned = provisioned;
     
     if (provisioned) {
-        ESP_LOGI(TAG, "Device has stored credentials, attempting to connect");
+        ESP_LOGD(TAG, "Device has stored credentials, attempting to connect");
         s_adapter_status.state = WIFI_ADAPTER_STATE_CONNECTING;
         
         // Step 4: Validate stored credentials
@@ -270,14 +270,14 @@ esp_err_t wifi_adapter_check_and_connect(void)
             return wifi_adapter_force_provisioning();
         }
         
-        ESP_LOGI(TAG, "Connecting to stored WiFi network: '%s' (length: %d)", config.sta.ssid, strlen((char*)config.sta.ssid));
+        ESP_LOGD(TAG, "Connecting to stored WiFi network: '%s' (length: %d)", config.sta.ssid, strlen((char*)config.sta.ssid));
         strncpy(s_adapter_status.ssid, (char *)config.sta.ssid, sizeof(s_adapter_status.ssid) - 1);
         s_adapter_status.ssid[sizeof(s_adapter_status.ssid) - 1] = '\0';
         
         return wifi_connection_manager_connect(&config);
         
     } else {
-        ESP_LOGI(TAG, "No stored credentials found - starting provisioning mode");
+        ESP_LOGD(TAG, "No stored credentials found - starting provisioning mode");
         return wifi_adapter_force_provisioning();
     }
 }
@@ -289,7 +289,7 @@ esp_err_t wifi_adapter_force_provisioning(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Starting forced WiFi provisioning");
+    ESP_LOGD(TAG, "Starting forced WiFi provisioning");
     
     wifi_connection_manager_stop();
     
@@ -307,7 +307,7 @@ esp_err_t wifi_adapter_reset_credentials(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Resetting WiFi credentials");
+    ESP_LOGD(TAG, "Resetting WiFi credentials");
     
     wifi_connection_manager_disconnect();
     wifi_prov_manager_stop();
@@ -355,160 +355,91 @@ bool wifi_adapter_is_connected(void)
 
 esp_err_t wifi_adapter_get_ip(esp_ip4_addr_t *ip)
 {
-    if (!s_adapter_initialized) {
-        ESP_LOGE(TAG, "WiFi adapter not initialized");
+    if (!s_adapter_initialized || !ip || !s_adapter_status.has_ip) {
         return ESP_ERR_INVALID_STATE;
     }
-    
-    if (ip == NULL) {
-        ESP_LOGE(TAG, "Invalid parameter: ip is NULL");
-        return ESP_ERR_INVALID_ARG;
-    }
-    
-    if (!s_adapter_status.has_ip) {
-        ESP_LOGW(TAG, "No IP address available");
-        return ESP_ERR_INVALID_STATE;
-    }
-    
+
     *ip = s_adapter_status.ip_addr;
     return ESP_OK;
 }
 
 esp_err_t wifi_adapter_get_mac(uint8_t *mac)
 {
-    if (!s_adapter_initialized) {
-        ESP_LOGE(TAG, "WiFi adapter not initialized");
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    if (mac == NULL) {
-        ESP_LOGE(TAG, "Invalid parameter: mac is NULL");
+    if (!s_adapter_initialized || !mac) {
         return ESP_ERR_INVALID_ARG;
     }
-    
+
     memcpy(mac, s_adapter_status.mac_address, 6);
     return ESP_OK;
 }
 
 esp_err_t wifi_adapter_get_ssid(char *ssid, size_t ssid_len)
 {
-    if (!s_adapter_initialized) {
-        ESP_LOGE(TAG, "WiFi adapter not initialized");
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    if (ssid == NULL || ssid_len == 0) {
-        ESP_LOGE(TAG, "Invalid parameters");
+    if (!s_adapter_initialized || !ssid || ssid_len == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    
+
     strncpy(ssid, s_adapter_status.ssid, ssid_len - 1);
     ssid[ssid_len - 1] = '\0';
-    
+
     return ESP_OK;
 }
 
 esp_err_t wifi_adapter_clear_all_credentials(void)
 {
     if (!s_adapter_initialized) {
-        ESP_LOGE(TAG, "WiFi adapter not initialized");
         return ESP_ERR_INVALID_STATE;
     }
-    
-    ESP_LOGI(TAG, "Clearing all stored WiFi credentials");
-    
-    // Stop any ongoing connections
+
+    // Stop connections and clear credentials
     wifi_connection_manager_disconnect();
     wifi_prov_manager_stop();
-    
-    // Clear ESP-IDF provisioning manager credentials
-    esp_err_t ret = wifi_prov_manager_reset_credentials();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to reset provisioning credentials: %s", esp_err_to_name(ret));
-    }
-    
-    // Clear direct WiFi config stored in default NVS partition
+    wifi_prov_manager_reset_credentials();
+
+    // Clear NVS credentials
     nvs_handle_t nvs_handle;
-    ret = nvs_open("nvs.net80211", NVS_READWRITE, &nvs_handle);
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "Clearing WiFi credentials from NVS");
+    if (nvs_open("nvs.net80211", NVS_READWRITE, &nvs_handle) == ESP_OK) {
         nvs_erase_all(nvs_handle);
         nvs_commit(nvs_handle);
         nvs_close(nvs_handle);
-    } else {
-        ESP_LOGW(TAG, "Failed to open WiFi NVS partition: %s", esp_err_to_name(ret));
     }
-    
-    // Clear any potential credentials in main nvs partition
-    ret = nvs_open("nvs", NVS_READWRITE, &nvs_handle);
-    if (ret == ESP_OK) {
-        // Clear potential wifi config entries
+
+    if (nvs_open("nvs", NVS_READWRITE, &nvs_handle) == ESP_OK) {
         nvs_erase_key(nvs_handle, "wifi.sta.ssid");
         nvs_erase_key(nvs_handle, "wifi.sta.password");
         nvs_erase_key(nvs_handle, "wifi.sta.pmk");
         nvs_commit(nvs_handle);
         nvs_close(nvs_handle);
     }
-    
+
     // Reset adapter status
     s_adapter_status.provisioned = false;
     s_adapter_status.connected = false;
     s_adapter_status.has_ip = false;
     s_adapter_status.state = WIFI_ADAPTER_STATE_UNINITIALIZED;
     memset(s_adapter_status.ssid, 0, sizeof(s_adapter_status.ssid));
-    
-    ESP_LOGI(TAG, "All WiFi credentials cleared - device will enter provisioning mode on next boot");
-    
+
     return ESP_OK;
 }
 
 esp_err_t wifi_adapter_check_first_boot_and_clear(void)
 {
-    ESP_LOGI(TAG, "Checking first boot status");
-    
     nvs_handle_t nvs_handle;
-    esp_err_t ret = nvs_open("liwaisi_config", NVS_READWRITE, &nvs_handle);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS handle for first boot check: %s", esp_err_to_name(ret));
-        return ret;
+    if (nvs_open("liwaisi_config", NVS_READWRITE, &nvs_handle) != ESP_OK) {
+        return ESP_FAIL;
     }
-    
+
     uint8_t first_boot_flag = 0;
     size_t required_size = sizeof(first_boot_flag);
-    ret = nvs_get_blob(nvs_handle, "first_boot_done", &first_boot_flag, &required_size);
-    
+    esp_err_t ret = nvs_get_blob(nvs_handle, "first_boot_done", &first_boot_flag, &required_size);
+
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        // First boot detected - but preserve any existing user credentials
-        ESP_LOGI(TAG, "First boot detected - preserving any existing user credentials");
-        nvs_close(nvs_handle);
-        
-        // Mark first boot as completed
-        ret = nvs_open("liwaisi_config", NVS_READWRITE, &nvs_handle);
-        if (ret == ESP_OK) {
-            first_boot_flag = 1;
-            ret = nvs_set_blob(nvs_handle, "first_boot_done", &first_boot_flag, sizeof(first_boot_flag));
-            if (ret == ESP_OK) {
-                ret = nvs_commit(nvs_handle);
-                if (ret == ESP_OK) {
-                    ESP_LOGI(TAG, "First boot flag set - future boots will preserve user credentials");
-                } else {
-                    ESP_LOGE(TAG, "Failed to commit first boot flag: %s", esp_err_to_name(ret));
-                }
-            } else {
-                ESP_LOGE(TAG, "Failed to set first boot flag: %s", esp_err_to_name(ret));
-            }
-            nvs_close(nvs_handle);
-        }
-        
-        return ESP_OK;
-    } else if (ret == ESP_OK) {
-        // Not first boot - keep existing credentials
-        ESP_LOGI(TAG, "Not first boot - preserving any existing user credentials");
-        nvs_close(nvs_handle);
-        return ESP_OK;
-    } else {
-        ESP_LOGE(TAG, "Failed to check first boot flag: %s", esp_err_to_name(ret));
-        nvs_close(nvs_handle);
-        return ret;
+        // First boot - mark as completed
+        first_boot_flag = 1;
+        nvs_set_blob(nvs_handle, "first_boot_done", &first_boot_flag, sizeof(first_boot_flag));
+        nvs_commit(nvs_handle);
     }
+
+    nvs_close(nvs_handle);
+    return ESP_OK;
 }

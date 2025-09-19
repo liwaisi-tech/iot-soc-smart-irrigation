@@ -32,117 +32,194 @@ static esp_netif_t *s_ap_netif = NULL;
 #define WIFI_PROV_SOFTAP_PASSWORD NULL
 #define WIFI_PROV_AP_MAX_STA_CONN 4
 
-// HTML webpage for WiFi configuration
-static const char html_page[] = 
-"<!DOCTYPE html>"
-"<html><head><title>Configura tu dispositivo Liwaisi</title>"
-"<meta charset='UTF-8'>"
-"<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
-"<style>"
-"body{font-family:Arial,sans-serif;margin:0;padding:20px;background:#f0f0f0;}"
-".container{max-width:400px;margin:0 auto;background:white;padding:30px;border-radius:10px;box-shadow:0 0 10px rgba(0,0,0,0.1);}"
-"h1{color:#2c3e50;text-align:center;margin-bottom:30px;}"
-".form-group{margin-bottom:20px;}"
-"label{display:block;margin-bottom:5px;font-weight:bold;color:#34495e;}"
-"input,select,textarea{width:100%;padding:10px;border:1px solid #ddd;border-radius:5px;font-size:16px;box-sizing:border-box;resize:vertical;}"
-"button{width:100%;background:#3498db;color:white;padding:12px;border:none;border-radius:5px;font-size:16px;cursor:pointer;margin-top:10px;}"
-"button:hover{background:#2980b9;}"
-".scan-btn{background:#27ae60;margin-bottom:10px;}"
-".scan-btn:hover{background:#229954;}"
-"#networks{margin-top:10px;}"
-".network{padding:10px;border:1px solid #ddd;margin:5px 0;border-radius:5px;cursor:pointer;}"
-".network:hover{background:#ecf0f1;}"
-".status{text-align:center;margin-top:20px;padding:10px;border-radius:5px;}"
-".success{background:#d5edda;color:#155724;border:1px solid #c3e6cb;}"
-".error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;}"
-".info{background:#d1ecf1;color:#0c5460;border:1px solid #bee5eb;}"
-"</style></head><body>"
-"<div class='container'>"
-"<h1>🌱 Configura tu dispositivo Liwaisi</h1>"
-"<h2>Configuración del dispositivo</h2>"
-"<div class='form-group'>"
-"<button class='scan-btn' onclick='scanNetworks()'>🔍 Escanear redes WiFi</button>"
-"<div id='networks'></div>"
-"</div>"
-"<form id='wifiForm'>"
-"<div class='form-group'>"
-"<label for='device_name'>Nombre del dispositivo:</label>"
-"<input type='text' id='device_name' name='device_name' maxlength='50' value='Liwaisi Smart Irrigation' required>"
-"</div>"
-"<div class='form-group'>"
-"<label for='device_location'>Ubicación del dispositivo:</label>"
-"<textarea id='device_location' name='device_location' maxlength='150' rows='3' placeholder='Describe la ubicación donde se instala este dispositivo...' required></textarea>"
-"</div>"
-"<div class='form-group'>"
-"<label for='ssid'>Nombre de la red (SSID):</label>"
-"<input type='text' id='ssid' name='ssid' required>"
-"</div>"
-"<div class='form-group'>"
-"<label for='password'>Contraseña:</label>"
-"<input type='password' id='password' name='password'>"
-"</div>"
-"<button type='submit'>💾 Guardar configuración</button>"
-"</form>"
-"<div id='status'></div>"
-"</div>"
-"<script>"
-"function scanNetworks(){"
-"document.getElementById('status').innerHTML='<div class=\"info\">Escaneando redes...</div>';"
-"fetch('/scan').then(r=>r.json()).then(data=>{"
-"let html='';"
-"data.networks.forEach(net=>{"
-"html+=`<div class=\"network\" onclick=\"selectNetwork('${net.ssid}','${net.auth}')\">`;"
-"html+=`📶 ${net.ssid} ${net.auth!='open'?'🔒':''}</div>`;"
-"});"
-"document.getElementById('networks').innerHTML=html;"
-"document.getElementById('status').innerHTML='<div class=\"success\">Encontradas '+data.networks.length+' redes</div>';"
-"}).catch(e=>{"
-"document.getElementById('status').innerHTML='<div class=\"error\">Escaneo fallido</div>';"
-"});}"
-"function selectNetwork(ssid,auth){"
-"document.getElementById('ssid').value=ssid;"
-"document.getElementById('password').focus();"
-"}"
-"document.getElementById('wifiForm').onsubmit=function(e){"
-"e.preventDefault();"
-"let deviceName=document.getElementById('device_name').value;"
-"let deviceLocation=document.getElementById('device_location').value;"
-"let ssid=document.getElementById('ssid').value;"
-"let password=document.getElementById('password').value;"
-"if(!deviceName){alert('Please enter device name');return;}"
-"if(!deviceLocation){alert('Please enter device location');return;}"
-"if(!ssid){alert('Please enter network name');return;}"
-"document.getElementById('status').innerHTML='<div class=\"info\">Saving configuration...</div>';"
-"let formData='device_name='+encodeURIComponent(deviceName)+'&device_location='+encodeURIComponent(deviceLocation)+'&ssid='+encodeURIComponent(ssid)+'&password='+encodeURIComponent(password);"
-"fetch('/config',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:formData})"
-".then(r=>r.json()).then(data=>{"
-"if(data.success){"
-"document.getElementById('status').innerHTML='<div class=\"success\">✅ Configuración guardada con éxito!<br>El dispositivo se reiniciará y se conectará a tu WiFi.</div>';"
-"setTimeout(()=>{window.location.href='/';},3000);"
-"}else{"
-"document.getElementById('status').innerHTML='<div class=\"error\">❌ Configuración fallida: '+data.message+'</div>';"
-"}"
-"}).catch(e=>{"
-"document.getElementById('status').innerHTML='<div class=\"error\">❌ Configuración fallida</div>';"
-"});}"
-"</script></body></html>";
+// Minified HTML for WiFi configuration (~4KB saved)
+static const char html_page[] =
+"<!DOCTYPE html><html><head><title>Config Liwaisi</title><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+"<style>body{font-family:Arial;margin:0;padding:10px;background:#f0f0f0}.c{max-width:400px;margin:0 auto;background:#fff;padding:20px;border-radius:5px;box-shadow:0 0 5px rgba(0,0,0,.1)}"
+"h1{color:#2c3e50;text-align:center;margin-bottom:20px}.g{margin-bottom:15px}label{display:block;margin-bottom:5px;font-weight:bold;color:#34495e}"
+"input,textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:3px;font-size:16px;box-sizing:border-box}button{width:100%;background:#3498db;color:#fff;padding:10px;border:none;border-radius:3px;font-size:16px;cursor:pointer;margin-top:10px}"
+"button:hover{background:#2980b9}.scan{background:#27ae60;margin-bottom:10px}.scan:hover{background:#229954}#networks{margin-top:10px}.net{padding:8px;border:1px solid #ddd;margin:3px 0;border-radius:3px;cursor:pointer}.net:hover{background:#ecf0f1}"
+".status{text-align:center;margin-top:15px;padding:8px;border-radius:3px}.success{background:#d5edda;color:#155724}.error{background:#f8d7da;color:#721c24}.info{background:#d1ecf1;color:#0c5460}"
+"</style></head><body><div class='c'><h1>🌱 Config Liwaisi</h1><div class='g'><button class='scan' onclick='scan()'>🔍 Scan WiFi</button><div id='nets'></div></div>"
+"<form id='form'><div class='g'><label>Dispositivo:</label><input id='dev' maxlength='50' value='Liwaisi Smart Irrigation' required></div>"
+"<div class='g'><label>Ubicación:</label><textarea id='loc' maxlength='150' rows='2' required></textarea></div>"
+"<div class='g'><label>Red (SSID):</label><input id='ssid' required></div><div class='g'><label>Contraseña:</label><input type='password' id='pass'></div>"
+"<button type='submit'>💾 Guardar</button></form><div id='status'></div></div>"
+"<script>function scan(){document.getElementById('status').innerHTML='<div class=\"info\">Escaneando...</div>';fetch('/scan').then(r=>r.json()).then(d=>{let h='';d.networks.forEach(n=>{h+=`<div class=\"net\" onclick=\"sel('${n.ssid}')\">${n.ssid} ${n.auth!='open'?'🔒':''}</div>`;});document.getElementById('nets').innerHTML=h;document.getElementById('status').innerHTML='<div class=\"success\">'+d.networks.length+' redes</div>';}).catch(e=>{document.getElementById('status').innerHTML='<div class=\"error\">Fallo</div>';})}function sel(s){document.getElementById('ssid').value=s;document.getElementById('pass').focus()}document.getElementById('form').onsubmit=function(e){e.preventDefault();let d=document.getElementById('dev').value,l=document.getElementById('loc').value,s=document.getElementById('ssid').value,p=document.getElementById('pass').value;if(!d||!l||!s){alert('Complete todos los campos');return}document.getElementById('status').innerHTML='<div class=\"info\">⏳ Validando WiFi...</div>';fetch('/config',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'device_name='+encodeURIComponent(d)+'&device_location='+encodeURIComponent(l)+'&ssid='+encodeURIComponent(s)+'&password='+encodeURIComponent(p)}).then(r=>r.json()).then(d=>{if(d.success){document.getElementById('status').innerHTML='<div class=\"success\">✅ WiFi configurado! Reiniciando...</div>';setTimeout(()=>window.location.href='/',3000)}else{let msg=d.message||'Error desconocido';if(msg.includes('incorrecta')){document.getElementById('status').innerHTML='<div class=\"error\">❌ Contraseña WiFi incorrecta</div>'}else if(msg.includes('no encontrada')){document.getElementById('status').innerHTML='<div class=\"error\">❌ Red WiFi no encontrada</div>'}else if(msg.includes('Timeout')){document.getElementById('status').innerHTML='<div class=\"error\">❌ Conexión lenta - intente de nuevo</div>'}else{document.getElementById('status').innerHTML='<div class=\"error\">❌ Error: '+msg+'</div>'}document.getElementById('pass').focus()}}).catch(e=>{document.getElementById('status').innerHTML='<div class=\"error\">❌ Error de conexión</div>'})}</script></body></html>";
 
 static wifi_config_t s_received_wifi_config = {0};
+static wifi_validation_result_t s_validation_result = WIFI_VALIDATION_OK;
+static EventGroupHandle_t s_validation_event_group = NULL;
+
+#define VALIDATION_SUCCESS_BIT BIT0
+#define VALIDATION_FAILED_BIT BIT1
+
+// Consolidated URL decode helper function (~2.5KB saved)
+static void url_decode(const char* src, char* dst, size_t dst_size) {
+    int decoded_len = 0;
+    for (int i = 0; src[i] && decoded_len < (dst_size - 1); i++) {
+        if (src[i] == '+') {
+            dst[decoded_len++] = ' ';
+        } else if (src[i] == '%' && src[i+1] && src[i+2]) {
+            char hex[3] = {src[i+1], src[i+2], 0};
+            dst[decoded_len++] = (char)strtol(hex, NULL, 16);
+            i += 2;
+        } else {
+            dst[decoded_len++] = src[i];
+        }
+    }
+    dst[decoded_len] = '\0';
+}
+
+// WiFi connection event handler for credential validation
+static void wifi_validation_event_handler(void* arg, esp_event_base_t event_base,
+                                          int32_t event_id, void* event_data)
+{
+    if (event_base == WIFI_CONNECTION_EVENTS) {
+        switch (event_id) {
+            case WIFI_CONNECTION_EVENT_CONNECTED:
+                ESP_LOGD(TAG, "Validation: WiFi connected successfully");
+                s_validation_result = WIFI_VALIDATION_OK;
+                xEventGroupSetBits(s_validation_event_group, VALIDATION_SUCCESS_BIT);
+                break;
+
+            case WIFI_CONNECTION_EVENT_AUTH_FAILED:
+                ESP_LOGW(TAG, "Validation: WiFi authentication failed");
+                s_validation_result = WIFI_VALIDATION_AUTH_FAILED;
+                xEventGroupSetBits(s_validation_event_group, VALIDATION_FAILED_BIT);
+                break;
+
+            case WIFI_CONNECTION_EVENT_NETWORK_NOT_FOUND:
+                ESP_LOGW(TAG, "Validation: WiFi network not found");
+                s_validation_result = WIFI_VALIDATION_NETWORK_NOT_FOUND;
+                xEventGroupSetBits(s_validation_event_group, VALIDATION_FAILED_BIT);
+                break;
+
+            case WIFI_CONNECTION_EVENT_RETRY_EXHAUSTED:
+                ESP_LOGW(TAG, "Validation: WiFi connection timeout");
+                s_validation_result = WIFI_VALIDATION_TIMEOUT;
+                xEventGroupSetBits(s_validation_event_group, VALIDATION_FAILED_BIT);
+                break;
+
+            default:
+                break;
+        }
+    }
+}
+
+// Validate WiFi credentials by attempting actual connection
+esp_err_t wifi_prov_manager_validate_credentials(const char* ssid, const char* password, wifi_validation_result_t* result)
+{
+    if (!ssid || !result) {
+        ESP_LOGE(TAG, "Invalid parameters for credential validation");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Validating WiFi credentials for SSID: %s", ssid);
+
+    // Create validation event group if needed
+    if (s_validation_event_group == NULL) {
+        s_validation_event_group = xEventGroupCreate();
+        if (s_validation_event_group == NULL) {
+            ESP_LOGE(TAG, "Failed to create validation event group");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    // Register temporary event handler for validation
+    esp_err_t ret = esp_event_handler_register(WIFI_CONNECTION_EVENTS, ESP_EVENT_ANY_ID,
+                                               &wifi_validation_event_handler, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register validation event handler: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Prepare WiFi config for validation
+    wifi_config_t validation_config = {0};
+    strncpy((char*)validation_config.sta.ssid, ssid, sizeof(validation_config.sta.ssid) - 1);
+    if (password && strlen(password) > 0) {
+        strncpy((char*)validation_config.sta.password, password, sizeof(validation_config.sta.password) - 1);
+    }
+
+    // Reset validation state
+    s_validation_result = WIFI_VALIDATION_OK;
+    xEventGroupClearBits(s_validation_event_group, VALIDATION_SUCCESS_BIT | VALIDATION_FAILED_BIT);
+
+    // Attempt to connect to validate credentials
+    ret = wifi_connection_manager_connect(&validation_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start validation connection: %s", esp_err_to_name(ret));
+        esp_event_handler_unregister(WIFI_CONNECTION_EVENTS, ESP_EVENT_ANY_ID, &wifi_validation_event_handler);
+        return ret;
+    }
+
+    // Wait for validation result with 15-second timeout (suitable for rural networks)
+    EventBits_t bits = xEventGroupWaitBits(s_validation_event_group,
+                                           VALIDATION_SUCCESS_BIT | VALIDATION_FAILED_BIT,
+                                           pdTRUE, pdFALSE,
+                                           pdMS_TO_TICKS(15000));
+
+    // Unregister validation event handler
+    esp_event_handler_unregister(WIFI_CONNECTION_EVENTS, ESP_EVENT_ANY_ID, &wifi_validation_event_handler);
+
+    if (bits & VALIDATION_SUCCESS_BIT) {
+        ESP_LOGI(TAG, "WiFi credential validation successful");
+        *result = WIFI_VALIDATION_OK;
+    } else if (bits & VALIDATION_FAILED_BIT) {
+        ESP_LOGW(TAG, "WiFi credential validation failed: %d", s_validation_result);
+        *result = s_validation_result;
+    } else {
+        ESP_LOGW(TAG, "WiFi credential validation timeout");
+        *result = WIFI_VALIDATION_TIMEOUT;
+        // Force disconnect to stop connection attempts
+        wifi_connection_manager_disconnect();
+    }
+
+    return ESP_OK;
+}
 
 // HTTP handler for main page
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, html_page, HTTPD_RESP_USE_STRLEN);
+
+    // Send HTML in chunks to prevent buffer overflow
+    const char* html = html_page;
+    size_t html_len = strlen(html_page);
+    size_t chunk_size = 1024;  // 1KB chunks
+    size_t sent = 0;
+
+    while (sent < html_len) {
+        size_t to_send = (html_len - sent > chunk_size) ? chunk_size : (html_len - sent);
+        esp_err_t ret = httpd_resp_send_chunk(req, html + sent, to_send);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to send HTML chunk: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        sent += to_send;
+    }
+
+    // Send final chunk (empty) to indicate end
+    httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
 
 // HTTP handler for WiFi scan
 static esp_err_t scan_get_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "Starting WiFi scan for web interface");
-    
-    // Start WiFi scan
+    ESP_LOGD(TAG, "Starting WiFi scan for web interface");
+
+    // Check available heap before starting scan
+    size_t free_heap = esp_get_free_heap_size();
+    if (free_heap < 20000) {  // Require at least 20KB free
+        ESP_LOGW(TAG, "Low memory before scan: %zu bytes", free_heap);
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Low memory\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    // Start WiFi scan with timeout protection
     wifi_scan_config_t scan_config = {
         .ssid = NULL,
         .bssid = NULL,
@@ -150,75 +227,163 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
         .show_hidden = false,
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
         .scan_time.active.min = 100,
-        .scan_time.active.max = 300
+        .scan_time.active.max = 500  // Reduced from 300 to 500ms for better reliability
     };
-    
+
     esp_err_t ret = esp_wifi_scan_start(&scan_config, true);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "WiFi scan failed: %s", esp_err_to_name(ret));
         httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, "{\"error\":\"Scan failed\"}", HTTPD_RESP_USE_STRLEN);
-        return ESP_FAIL;
+        return ESP_OK;  // Return ESP_OK to avoid connection close
     }
-    
-    // Get scan results
+
+    // Get scan results with bounds checking
     uint16_t ap_count = 0;
-    esp_wifi_scan_get_ap_num(&ap_count);
-    
-    wifi_ap_record_t *ap_list = malloc(ap_count * sizeof(wifi_ap_record_t));
-    if (ap_list == NULL) {
+    ret = esp_wifi_scan_get_ap_num(&ap_count);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get AP count: %s", esp_err_to_name(ret));
         httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_send(req, "{\"error\":\"Memory allocation failed\"}", HTTPD_RESP_USE_STRLEN);
-        return ESP_FAIL;
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Scan result failed\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    // Limit scan results to prevent memory issues
+    if (ap_count > 15) {
+        ESP_LOGW(TAG, "Too many APs found (%d), limiting to 15", ap_count);
+        ap_count = 15;
     }
     
-    esp_wifi_scan_get_ap_records(&ap_count, ap_list);
-    
-    // Build JSON response
-    char *json_response = malloc(4096);
-    if (json_response == NULL) {
+    // Safe memory allocation with NULL checks
+    wifi_ap_record_t *ap_list = NULL;
+    char *json_response = NULL;
+
+    if (ap_count == 0) {
+        ESP_LOGD(TAG, "No WiFi networks found");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"networks\":[]}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    ap_list = malloc(ap_count * sizeof(wifi_ap_record_t));
+    if (ap_list == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for AP list (%d APs)", ap_count);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Memory allocation failed\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    ret = esp_wifi_scan_get_ap_records(&ap_count, ap_list);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get AP records: %s", esp_err_to_name(ret));
         free(ap_list);
         httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Scan records failed\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    // Calculate required JSON buffer size more precisely
+    size_t required_size = 50; // Base JSON structure
+    for (int i = 0; i < ap_count && i < 15; i++) {
+        required_size += strlen((char*)ap_list[i].ssid) + 100; // SSID + JSON overhead
+    }
+
+    // Allocate with safety margin
+    json_response = malloc(required_size + 200);
+    if (json_response == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate JSON buffer (%zu bytes)", required_size);
+        free(ap_list);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, "{\"error\":\"Memory allocation failed\"}", HTTPD_RESP_USE_STRLEN);
-        return ESP_FAIL;
+        return ESP_OK;
     }
     
     strcpy(json_response, "{\"networks\":[");
-    
-    for (int i = 0; i < ap_count && i < 20; i++) { // Limit to 20 networks
-        char network_entry[200];
+
+    for (int i = 0; i < ap_count && i < 15; i++) { // Limit to 15 networks
+        char network_entry[256]; // Increased buffer size for safety
         const char *auth_mode = "open";
-        
+
+        // Validate SSID to prevent JSON injection
+        if (strlen((char*)ap_list[i].ssid) == 0) {
+            continue; // Skip hidden/empty SSIDs
+        }
+
         if (ap_list[i].authmode != WIFI_AUTH_OPEN) {
             auth_mode = "secured";
         }
-        
-        snprintf(network_entry, sizeof(network_entry),
-                "%s{\"ssid\": \"%s\", \"rssi\": %d, \"auth\": \"%s\"}",
-                i > 0 ? "," : "",
-                (char*)ap_list[i].ssid,
-                ap_list[i].rssi,
-                auth_mode);
-        
+
+        // Safe JSON construction with bounds checking
+        int written = snprintf(network_entry, sizeof(network_entry),
+                              "%s{\"ssid\": \"%.*s\", \"rssi\": %d, \"auth\": \"%s\"}",
+                              i > 0 ? "," : "",
+                              32, (char*)ap_list[i].ssid,  // Limit SSID length
+                              ap_list[i].rssi,
+                              auth_mode);
+
+        if (written >= sizeof(network_entry)) {
+            ESP_LOGW(TAG, "Network entry truncated for SSID: %s", ap_list[i].ssid);
+        }
+
+        // Check if we have enough space in response buffer
+        if (strlen(json_response) + strlen(network_entry) + 10 > required_size + 150) {
+            ESP_LOGW(TAG, "Response buffer full, truncating at %d networks", i);
+            break;
+        }
+
         strcat(json_response, network_entry);
     }
-    
+
     strcat(json_response, "]}");
     
-    free(ap_list);
-    
+    // Send response using chunked encoding for large responses
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_response, strlen(json_response));
-    
+
+    size_t response_len = strlen(json_response);
+    if (response_len > 1024) {
+        // Send in chunks if response is large
+        size_t sent = 0;
+        size_t chunk_size = 512;
+        while (sent < response_len) {
+            size_t to_send = (response_len - sent > chunk_size) ? chunk_size : (response_len - sent);
+            esp_err_t send_ret = httpd_resp_send_chunk(req, json_response + sent, to_send);
+            if (send_ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to send JSON chunk: %s", esp_err_to_name(send_ret));
+                break;
+            }
+            sent += to_send;
+        }
+        httpd_resp_send_chunk(req, NULL, 0); // End chunked response
+    } else {
+        // Send as single response for small JSON
+        httpd_resp_send(req, json_response, response_len);
+    }
+
+    // Cleanup resources
+    free(ap_list);
     free(json_response);
-    
-    ESP_LOGI(TAG, "WiFi scan completed, found %d networks", ap_count);
+
+    ESP_LOGD(TAG, "WiFi scan completed, found %d networks (sent %zu bytes)", ap_count, response_len);
     return ESP_OK;
 }
 
 // HTTP handler for WiFi connection
 static esp_err_t connect_post_handler(httpd_req_t *req)
 {
+    // Check memory before processing request
+    if (esp_get_free_heap_size() < 10000) {
+        ESP_LOGW(TAG, "Low memory for connect request");
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"message\":\"Low memory\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
     char content[512];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
     
@@ -230,7 +395,7 @@ static esp_err_t connect_post_handler(httpd_req_t *req)
     }
     
     content[ret] = '\0';
-    ESP_LOGI(TAG, "Received WiFi config: %s", content);
+    ESP_LOGD(TAG, "Received WiFi config: %s", content);
     
     // Parse form data
     char ssid[33] = {0};
@@ -252,19 +417,7 @@ static esp_err_t connect_post_handler(httpd_req_t *req)
         
         // URL decode SSID
         char decoded_ssid[33] = {0};
-        int decoded_len = 0;
-        for (int i = 0; ssid[i] && decoded_len < 32; i++) {
-            if (ssid[i] == '+') {
-                decoded_ssid[decoded_len++] = ' ';
-            } else if (ssid[i] == '%' && ssid[i+1] && ssid[i+2]) {
-                // URL decode %XX
-                char hex[3] = {ssid[i+1], ssid[i+2], 0};
-                decoded_ssid[decoded_len++] = (char)strtol(hex, NULL, 16);
-                i += 2;
-            } else {
-                decoded_ssid[decoded_len++] = ssid[i];
-            }
-        }
+        url_decode(ssid, decoded_ssid, sizeof(decoded_ssid));
         strcpy(ssid, decoded_ssid);
     }
     
@@ -280,19 +433,7 @@ static esp_err_t connect_post_handler(httpd_req_t *req)
         
         // URL decode password
         char decoded_password[65] = {0};
-        int decoded_len = 0;
-        for (int i = 0; password[i] && decoded_len < 64; i++) {
-            if (password[i] == '+') {
-                decoded_password[decoded_len++] = ' ';
-            } else if (password[i] == '%' && password[i+1] && password[i+2]) {
-                // URL decode %XX
-                char hex[3] = {password[i+1], password[i+2], 0};
-                decoded_password[decoded_len++] = (char)strtol(hex, NULL, 16);
-                i += 2;
-            } else {
-                decoded_password[decoded_len++] = password[i];
-            }
-        }
+        url_decode(password, decoded_password, sizeof(decoded_password));
         strcpy(password, decoded_password);
     }
     
@@ -302,7 +443,7 @@ static esp_err_t connect_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Attempting to connect to WiFi: %s", ssid);
+    ESP_LOGD(TAG, "Attempting to connect to WiFi: %s", ssid);
     
     // Store WiFi config
     memset(&s_received_wifi_config, 0, sizeof(s_received_wifi_config));
@@ -332,6 +473,15 @@ static esp_err_t connect_post_handler(httpd_req_t *req)
 // HTTP handler for device configuration
 static esp_err_t config_post_handler(httpd_req_t *req)
 {
+    // Check memory before processing request
+    if (esp_get_free_heap_size() < 15000) {
+        ESP_LOGW(TAG, "Low memory for config request");
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"message\":\"Low memory\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
     char content[1024];
     size_t recv_size = MIN(req->content_len, sizeof(content) - 1);
     
@@ -343,7 +493,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     }
     
     content[ret] = '\0';
-    ESP_LOGI(TAG, "Received device configuration: %s", content);
+    ESP_LOGD(TAG, "Received device configuration: %s", content);
     
     // Parse form data
     char device_name[DEVICE_NAME_MAX_LEN + 1] = {0};
@@ -365,18 +515,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         
         // URL decode device_name
         char decoded_name[DEVICE_NAME_MAX_LEN + 1] = {0};
-        int decoded_len = 0;
-        for (int i = 0; device_name[i] && decoded_len < DEVICE_NAME_MAX_LEN; i++) {
-            if (device_name[i] == '+') {
-                decoded_name[decoded_len++] = ' ';
-            } else if (device_name[i] == '%' && device_name[i+1] && device_name[i+2]) {
-                char hex[3] = {device_name[i+1], device_name[i+2], 0};
-                decoded_name[decoded_len++] = (char)strtol(hex, NULL, 16);
-                i += 2;
-            } else {
-                decoded_name[decoded_len++] = device_name[i];
-            }
-        }
+        url_decode(device_name, decoded_name, sizeof(decoded_name));
         strcpy(device_name, decoded_name);
     }
     
@@ -394,18 +533,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         
         // URL decode device_location
         char decoded_location[DEVICE_LOCATION_MAX_LEN + 1] = {0};
-        int decoded_len = 0;
-        for (int i = 0; device_location[i] && decoded_len < DEVICE_LOCATION_MAX_LEN; i++) {
-            if (device_location[i] == '+') {
-                decoded_location[decoded_len++] = ' ';
-            } else if (device_location[i] == '%' && device_location[i+1] && device_location[i+2]) {
-                char hex[3] = {device_location[i+1], device_location[i+2], 0};
-                decoded_location[decoded_len++] = (char)strtol(hex, NULL, 16);
-                i += 2;
-            } else {
-                decoded_location[decoded_len++] = device_location[i];
-            }
-        }
+        url_decode(device_location, decoded_location, sizeof(decoded_location));
         strcpy(device_location, decoded_location);
     }
     
@@ -425,18 +553,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         
         // URL decode SSID
         char decoded_ssid[33] = {0};
-        int decoded_len = 0;
-        for (int i = 0; ssid[i] && decoded_len < 32; i++) {
-            if (ssid[i] == '+') {
-                decoded_ssid[decoded_len++] = ' ';
-            } else if (ssid[i] == '%' && ssid[i+1] && ssid[i+2]) {
-                char hex[3] = {ssid[i+1], ssid[i+2], 0};
-                decoded_ssid[decoded_len++] = (char)strtol(hex, NULL, 16);
-                i += 2;
-            } else {
-                decoded_ssid[decoded_len++] = ssid[i];
-            }
-        }
+        url_decode(ssid, decoded_ssid, sizeof(decoded_ssid));
         strcpy(ssid, decoded_ssid);
     }
     
@@ -452,18 +569,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         
         // URL decode password
         char decoded_password[65] = {0};
-        int decoded_len = 0;
-        for (int i = 0; password[i] && decoded_len < 64; i++) {
-            if (password[i] == '+') {
-                decoded_password[decoded_len++] = ' ';
-            } else if (password[i] == '%' && password[i+1] && password[i+2]) {
-                char hex[3] = {password[i+1], password[i+2], 0};
-                decoded_password[decoded_len++] = (char)strtol(hex, NULL, 16);
-                i += 2;
-            } else {
-                decoded_password[decoded_len++] = password[i];
-            }
-        }
+        url_decode(password, decoded_password, sizeof(decoded_password));
         strcpy(password, decoded_password);
     }
     
@@ -486,16 +592,16 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Device configuration - Name: '%s', Location: '%s', WiFi: '%s'", 
+    ESP_LOGD(TAG, "Device configuration - Name: '%s', Location: '%s', WiFi: '%s'",
              device_name, device_location, ssid);
-    
+
     // Save device configuration using the service
     device_config_t device_config;
     strncpy(device_config.device_name, device_name, DEVICE_NAME_MAX_LEN);
     device_config.device_name[DEVICE_NAME_MAX_LEN] = '\0';
     strncpy(device_config.device_location, device_location, DEVICE_LOCATION_MAX_LEN);
     device_config.device_location[DEVICE_LOCATION_MAX_LEN] = '\0';
-    
+
     esp_err_t config_ret = device_config_service_set_config(&device_config);
     if (config_ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save device configuration: %s", esp_err_to_name(config_ret));
@@ -503,25 +609,91 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         httpd_resp_send(req, "{\"success\":false,\"message\":\"Failed to save device configuration\"}", HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
-    
-    // Store WiFi configuration
+
+    // CRITICAL: Validate WiFi credentials before responding success
+    ESP_LOGI(TAG, "Validating WiFi credentials before saving...");
+    s_prov_manager.state = WIFI_PROV_STATE_VALIDATING;
+
+    wifi_validation_result_t validation_result;
+    esp_err_t validation_ret = wifi_prov_manager_validate_credentials(ssid, password, &validation_result);
+
+    if (validation_ret != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi validation failed with error: %s", esp_err_to_name(validation_ret));
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"message\":\"Failed to validate WiFi credentials\"}", HTTPD_RESP_USE_STRLEN);
+        s_prov_manager.state = WIFI_PROV_STATE_ERROR;
+        return ESP_OK;
+    }
+
+    // Handle validation results with specific error messages
+    const char* error_response = NULL;
+    switch (validation_result) {
+        case WIFI_VALIDATION_OK:
+            ESP_LOGI(TAG, "WiFi credentials validated successfully");
+            break;
+
+        case WIFI_VALIDATION_AUTH_FAILED:
+            ESP_LOGW(TAG, "WiFi authentication failed - incorrect password");
+            error_response = "{\"success\":false,\"message\":\"Contraseña WiFi incorrecta\"}";
+            break;
+
+        case WIFI_VALIDATION_NETWORK_NOT_FOUND:
+            ESP_LOGW(TAG, "WiFi network not found");
+            error_response = "{\"success\":false,\"message\":\"Red WiFi no encontrada\"}";
+            break;
+
+        case WIFI_VALIDATION_TIMEOUT:
+            ESP_LOGW(TAG, "WiFi connection timeout");
+            error_response = "{\"success\":false,\"message\":\"Timeout de conexión WiFi\"}";
+            break;
+
+        default:
+            ESP_LOGW(TAG, "WiFi validation failed with unknown error");
+            error_response = "{\"success\":false,\"message\":\"Error de conexión WiFi\"}";
+            break;
+    }
+
+    if (error_response) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, error_response, HTTPD_RESP_USE_STRLEN);
+        s_prov_manager.state = WIFI_PROV_STATE_ERROR;
+
+        // Post specific failure events
+        switch (validation_result) {
+            case WIFI_VALIDATION_AUTH_FAILED:
+                esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_AUTH_FAILED, NULL, 0, portMAX_DELAY);
+                break;
+            case WIFI_VALIDATION_NETWORK_NOT_FOUND:
+                esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_NETWORK_NOT_FOUND, NULL, 0, portMAX_DELAY);
+                break;
+            case WIFI_VALIDATION_TIMEOUT:
+                esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_VALIDATION_TIMEOUT, NULL, 0, portMAX_DELAY);
+                break;
+            default:
+                esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_CREDENTIALS_FAILED, NULL, 0, portMAX_DELAY);
+                break;
+        }
+        return ESP_OK;
+    }
+
+    // Store WiFi configuration only after successful validation
     memset(&s_received_wifi_config, 0, sizeof(s_received_wifi_config));
     strncpy((char*)s_received_wifi_config.sta.ssid, ssid, sizeof(s_received_wifi_config.sta.ssid) - 1);
     strncpy((char*)s_received_wifi_config.sta.password, password, sizeof(s_received_wifi_config.sta.password) - 1);
-    
+
     // Update provisioning state
     s_prov_manager.provisioned = true;
     s_prov_manager.state = WIFI_PROV_STATE_CONNECTED;
     strncpy(s_prov_manager.ssid, ssid, sizeof(s_prov_manager.ssid) - 1);
-    
-    // Respond with success
+
+    // Respond with success only after validation passes
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"success\":true,\"message\":\"Configuration saved successfully\"}", HTTPD_RESP_USE_STRLEN);
-    
+    httpd_resp_send(req, "{\"success\":true,\"message\":\"WiFi configurado exitosamente\"}", HTTPD_RESP_USE_STRLEN);
+
     // Post events
     esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_CREDENTIALS_RECEIVED, &s_received_wifi_config.sta, sizeof(wifi_sta_config_t), portMAX_DELAY);
     esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_CREDENTIALS_SUCCESS, NULL, 0, portMAX_DELAY);
-    
+
     // Delay then post completion event
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_COMPLETED, NULL, 0, portMAX_DELAY);
@@ -535,7 +707,7 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
     if (event_base == WIFI_PROV_EVENT) {
         switch (event_id) {
             case WIFI_PROV_START:
-                ESP_LOGI(TAG, "Provisioning started");
+                ESP_LOGD(TAG, "Provisioning started");
                 s_prov_manager.state = WIFI_PROV_STATE_PROVISIONING;
                 s_prov_manager.provisioning_active = true;
                 esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_STARTED, NULL, 0, portMAX_DELAY);
@@ -543,7 +715,7 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
                 
             case WIFI_PROV_CRED_RECV: {
                 wifi_sta_config_t *wifi_sta_cfg = (wifi_sta_config_t *)event_data;
-                ESP_LOGI(TAG, "Received WiFi credentials for SSID: %s", wifi_sta_cfg->ssid);
+                ESP_LOGD(TAG, "Received WiFi credentials for SSID: %s", wifi_sta_cfg->ssid);
                 
                 strncpy(s_prov_manager.ssid, (char *)wifi_sta_cfg->ssid, sizeof(s_prov_manager.ssid) - 1);
                 s_prov_manager.ssid[sizeof(s_prov_manager.ssid) - 1] = '\0';
@@ -554,7 +726,7 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
             }
             
             case WIFI_PROV_CRED_SUCCESS:
-                ESP_LOGI(TAG, "WiFi credentials validation successful");
+                ESP_LOGD(TAG, "WiFi credentials validation successful");
                 s_prov_manager.state = WIFI_PROV_STATE_CONNECTED;
                 esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_CREDENTIALS_SUCCESS, NULL, 0, portMAX_DELAY);
                 break;
@@ -565,7 +737,7 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
                 break;
                 
             case WIFI_PROV_END:
-                ESP_LOGI(TAG, "Provisioning ended");
+                ESP_LOGD(TAG, "Provisioning ended");
                 s_prov_manager.provisioning_active = false;
                 s_prov_manager.provisioned = true;
                 
@@ -588,7 +760,7 @@ esp_err_t wifi_prov_manager_init(void)
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Initializing WiFi provisioning manager");
+    ESP_LOGD(TAG, "Initializing WiFi provisioning manager");
     
     esp_err_t ret = boot_counter_init();
     if (ret != ESP_OK) {
@@ -612,7 +784,7 @@ esp_err_t wifi_prov_manager_init(void)
     
     s_prov_manager_initialized = true;
     
-    ESP_LOGI(TAG, "WiFi provisioning manager initialized successfully");
+    ESP_LOGD(TAG, "WiFi provisioning manager initialized successfully");
     return ESP_OK;
 }
 
@@ -623,7 +795,7 @@ esp_err_t wifi_prov_manager_start(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Starting web-based WiFi provisioning");
+    ESP_LOGD(TAG, "Starting web-based WiFi provisioning");
     
     // Create network interfaces if not exist
     if (s_ap_netif == NULL) {
@@ -668,16 +840,32 @@ esp_err_t wifi_prov_manager_start(void)
     ESP_ERROR_CHECK(esp_netif_set_ip_info(s_ap_netif, &ip_info));
     ESP_ERROR_CHECK(esp_netif_dhcps_start(s_ap_netif));
     
-    // Start HTTP server
+    // Enhanced HTTP server configuration for stability
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.lru_purge_enable = true;
-    server_config.max_uri_handlers = 8;
-    
+    server_config.task_priority = 5;                    // Lower priority than main tasks
+    server_config.stack_size = 6144;                   // Increased stack for chunked responses
+    server_config.core_id = 1;                         // Pin to core 1
+    server_config.max_open_sockets = 3;                // Limit concurrent connections
+    server_config.max_uri_handlers = 6;                // Reduced from 8
+    server_config.max_resp_headers = 8;                // Limit response headers
+    server_config.send_wait_timeout = 10;              // 10 second send timeout
+    server_config.recv_wait_timeout = 10;              // 10 second receive timeout
+    server_config.lru_purge_enable = true;             // Enable LRU socket purging
+    server_config.close_fn = NULL;                     // Use default close
+    server_config.global_user_ctx = NULL;              // No global context
+    server_config.global_user_ctx_free_fn = NULL;      // No cleanup needed
+    server_config.global_transport_ctx = NULL;         // No transport context
+    server_config.global_transport_ctx_free_fn = NULL; // No transport cleanup
+    server_config.enable_so_linger = true;             // Enable socket lingering
+    server_config.linger_timeout = 1;                  // 1 second linger
+
     esp_err_t ret = httpd_start(&s_server, &server_config);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to start provisioning HTTP server: %s", esp_err_to_name(ret));
         return ret;
     }
+
+    ESP_LOGI(TAG, "Provisioning HTTP server started on port %d", server_config.server_port);
     
     // Register URI handlers
     httpd_uri_t root_uri = {
@@ -715,9 +903,9 @@ esp_err_t wifi_prov_manager_start(void)
     s_prov_manager.state = WIFI_PROV_STATE_PROVISIONING;
     s_prov_manager.provisioning_active = true;
     
-    ESP_LOGI(TAG, "Web-based provisioning started");
-    ESP_LOGI(TAG, "AP SSID: %s", WIFI_PROV_SOFTAP_SSID_DEFAULT);
-    ESP_LOGI(TAG, "Web interface: http://192.168.4.1");
+    ESP_LOGD(TAG, "Web-based provisioning started");
+    ESP_LOGD(TAG, "AP SSID: %s", WIFI_PROV_SOFTAP_SSID_DEFAULT);
+    ESP_LOGD(TAG, "Web interface: http://192.168.4.1");
     
     // Post start event
     esp_event_post(WIFI_PROV_EVENTS, WIFI_PROV_EVENT_STARTED, NULL, 0, portMAX_DELAY);
@@ -732,23 +920,32 @@ esp_err_t wifi_prov_manager_stop(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Stopping web-based WiFi provisioning");
+    ESP_LOGD(TAG, "Stopping web-based WiFi provisioning");
     
     if (s_prov_manager.provisioning_active) {
-        // Stop HTTP server
+        // Stop HTTP server with proper cleanup
         if (s_server) {
-            httpd_stop(s_server);
+            ESP_LOGI(TAG, "Stopping provisioning HTTP server...");
+            esp_err_t stop_ret = httpd_stop(s_server);
+            if (stop_ret != ESP_OK) {
+                ESP_LOGW(TAG, "HTTP server stop returned: %s", esp_err_to_name(stop_ret));
+            }
             s_server = NULL;
+
+            // Give time for server cleanup
+            vTaskDelay(pdMS_TO_TICKS(500));
+            ESP_LOGI(TAG, "Provisioning HTTP server stopped");
         }
-        
+
         // Transition WiFi from APSTA mode back to STA mode
+        ESP_LOGI(TAG, "Transitioning WiFi from APSTA to STA mode...");
         esp_wifi_stop();
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
-        
+
         s_prov_manager.provisioning_active = false;
         s_prov_manager.state = WIFI_PROV_STATE_INIT;
-        
+
         ESP_LOGI(TAG, "WiFi transitioned back to STA mode for normal operation");
     }
     
@@ -761,21 +958,27 @@ esp_err_t wifi_prov_manager_deinit(void)
         ESP_LOGW(TAG, "Provisioning manager not initialized");
         return ESP_OK;
     }
-    
-    ESP_LOGI(TAG, "Deinitializing web-based WiFi provisioning manager");
-    
+
+    ESP_LOGD(TAG, "Deinitializing web-based WiFi provisioning manager");
+
     wifi_prov_manager_stop();
-    
+
     // Destroy AP network interface (STA is managed by wifi_connection_manager)
     if (s_ap_netif) {
         esp_netif_destroy(s_ap_netif);
         s_ap_netif = NULL;
     }
-    
+
+    // Clean up validation event group
+    if (s_validation_event_group) {
+        vEventGroupDelete(s_validation_event_group);
+        s_validation_event_group = NULL;
+    }
+
     ESP_ERROR_CHECK(esp_event_handler_unregister(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID, &wifi_prov_event_handler));
-    
+
     s_prov_manager_initialized = false;
-    
+
     return ESP_OK;
 }
 
@@ -805,8 +1008,8 @@ esp_err_t wifi_prov_manager_is_provisioned(bool *provisioned)
         strncpy(s_prov_manager.ssid, (char*)stored_wifi_cfg.sta.ssid, sizeof(s_prov_manager.ssid) - 1);
         s_prov_manager.ssid[sizeof(s_prov_manager.ssid) - 1] = '\0';
         
-        ESP_LOGI(TAG, "Device provisioning status: provisioned (from ESP-IDF storage)");
-        ESP_LOGI(TAG, "Stored SSID: '%s' (length: %d)", stored_wifi_cfg.sta.ssid, strlen((char*)stored_wifi_cfg.sta.ssid));
+        ESP_LOGD(TAG, "Device provisioning status: provisioned (from ESP-IDF storage)");
+        ESP_LOGD(TAG, "Stored SSID: '%s' (length: %d)", stored_wifi_cfg.sta.ssid, strlen((char*)stored_wifi_cfg.sta.ssid));
     } else {
         // No valid credentials found in storage
         *provisioned = false;
@@ -814,7 +1017,7 @@ esp_err_t wifi_prov_manager_is_provisioned(bool *provisioned)
         memset(&s_received_wifi_config, 0, sizeof(s_received_wifi_config));
         memset(s_prov_manager.ssid, 0, sizeof(s_prov_manager.ssid));
         
-        ESP_LOGI(TAG, "Device provisioning status: not provisioned (no stored credentials)");
+        ESP_LOGD(TAG, "Device provisioning status: not provisioned (no stored credentials)");
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to get WiFi config from storage: %s", esp_err_to_name(ret));
         }
@@ -830,7 +1033,7 @@ esp_err_t wifi_prov_manager_reset_credentials(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Resetting web-based WiFi credentials");
+    ESP_LOGD(TAG, "Resetting web-based WiFi credentials");
     
     // Clear stored credentials
     memset(&s_received_wifi_config, 0, sizeof(s_received_wifi_config));
@@ -839,7 +1042,7 @@ esp_err_t wifi_prov_manager_reset_credentials(void)
     s_prov_manager.state = WIFI_PROV_STATE_INIT;
     memset(s_prov_manager.ssid, 0, sizeof(s_prov_manager.ssid));
     
-    ESP_LOGI(TAG, "WiFi credentials reset successfully");
+    ESP_LOGD(TAG, "WiFi credentials reset successfully");
     
     return ESP_OK;
 }
@@ -851,13 +1054,13 @@ esp_err_t wifi_prov_manager_wait_for_completion(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Waiting for provisioning completion");
+    ESP_LOGD(TAG, "Waiting for provisioning completion");
     
     while (s_prov_manager.provisioning_active) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     
-    ESP_LOGI(TAG, "Provisioning completed");
+    ESP_LOGD(TAG, "Provisioning completed");
     
     return ESP_OK;
 }
@@ -887,7 +1090,7 @@ esp_err_t wifi_prov_manager_get_config(wifi_config_t *config)
     // Return the credentials captured from web interface
     *config = s_received_wifi_config;
     
-    ESP_LOGI(TAG, "Returning stored WiFi config for SSID: %s", config->sta.ssid);
+    ESP_LOGD(TAG, "Returning stored WiFi config for SSID: %s", config->sta.ssid);
     
     return ESP_OK;
 }

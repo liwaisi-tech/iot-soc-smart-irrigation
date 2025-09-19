@@ -58,7 +58,9 @@ dkms.conf
 build/
 sdkconfig
 sdkconfig.old
-sdkconfig.defaults.*
+sdkconfig.defaults.ci
+sdkconfig.defaults.esp32
+sdkconfig.defaults.esp32s*
 managed_components/
 dependencies.lock
 .idf_tools/

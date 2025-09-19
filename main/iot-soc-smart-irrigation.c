@@ -95,30 +95,30 @@ static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
                 
             case WIFI_ADAPTER_EVENT_PROVISIONING_COMPLETED:
                 ESP_LOGI(TAG, "Aprovisionamiento WiFi completado");
-
-                // NOW it's safe to initialize HTTP adapter after provisioning is complete
-                if (!s_http_adapter_initialized) {
-                    ESP_LOGI(TAG, "Inicializando adaptador HTTP tras completar aprovisionamiento...");
-                    // Small delay to ensure provisioning server is fully stopped
-                    vTaskDelay(pdMS_TO_TICKS(1000));
-                    esp_err_t ret = http_adapter_init();
-                    if (ret == ESP_OK) {
-                        s_http_adapter_initialized = true;
-                        ESP_LOGI(TAG, "Adaptador HTTP inicializado correctamente");
-                    } else {
-                        ESP_LOGE(TAG, "Error al inicializar adaptador HTTP: %s", esp_err_to_name(ret));
-                    }
-                }
                 break;
-                
+
             case WIFI_ADAPTER_EVENT_CONNECTED:
                 ESP_LOGI(TAG, "Conexión WiFi establecida");
                 break;
-                
+
             case WIFI_ADAPTER_EVENT_IP_OBTAINED: {
                 esp_ip4_addr_t ip;
                 if (wifi_adapter_get_ip(&ip) == ESP_OK) {
                     ESP_LOGI(TAG, "Dirección IP obtenida: " IPSTR, IP2STR(&ip));
+                }
+
+                // Initialize HTTP adapter when IP is obtained (both after provisioning and normal connections)
+                if (!s_http_adapter_initialized) {
+                    ESP_LOGI(TAG, "Inicializando adaptador HTTP tras obtener IP...");
+                    // Small delay to ensure any provisioning server is fully stopped
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    esp_err_t ret = http_adapter_init();
+                    if (ret == ESP_OK) {
+                        s_http_adapter_initialized = true;
+                        ESP_LOGI(TAG, "Adaptador HTTP inicializado correctamente en IP: " IPSTR, IP2STR(&ip));
+                    } else {
+                        ESP_LOGE(TAG, "Error al inicializar adaptador HTTP: %s", esp_err_to_name(ret));
+                    }
                 }
                 break;
             }

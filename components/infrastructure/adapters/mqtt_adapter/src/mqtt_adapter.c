@@ -41,42 +41,32 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "MQTT client connected to broker");
             s_mqtt_connection.state = MQTT_CONNECTION_STATE_CONNECTED;
-            s_mqtt_connection.stats.connect_count++;
-            s_mqtt_connection.stats.last_connect_time = esp_timer_get_time() / 1000000; // Convert to seconds
             s_mqtt_connection.stats.current_retry_delay_ms = CONFIG_MQTT_RECONNECT_INITIAL_DELAY_MS; // Reset retry delay
-            
-            // Stop reconnection timer if running
+
             if (s_reconnect_timer != NULL) {
                 esp_timer_stop(s_reconnect_timer);
             }
-            
+
             esp_event_post(MQTT_ADAPTER_EVENTS, MQTT_ADAPTER_EVENT_CONNECTED, NULL, 0, portMAX_DELAY);
-            
-            // Automatically publish device registration after connection
-            esp_err_t ret = mqtt_adapter_publish_device_registration();
-            if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to publish device registration: %s", esp_err_to_name(ret));
+
+            // Publish device registration
+            if (mqtt_adapter_publish_device_registration() != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to publish device registration");
             }
             break;
             
         case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGW(TAG, "MQTT client disconnected from broker");
             s_mqtt_connection.state = MQTT_CONNECTION_STATE_DISCONNECTED;
-            s_mqtt_connection.stats.disconnect_count++;
-            s_mqtt_connection.stats.last_disconnect_time = esp_timer_get_time() / 1000000;
             s_mqtt_connection.device_registered = false;
-            
+
             esp_event_post(MQTT_ADAPTER_EVENTS, MQTT_ADAPTER_EVENT_DISCONNECTED, NULL, 0, portMAX_DELAY);
-            
+
             // Start reconnection timer with exponential backoff
             mqtt_adapter_start_reconnect_timer(s_mqtt_connection.stats.current_retry_delay_ms);
             break;
             
         case MQTT_EVENT_PUBLISHED:
-            ESP_LOGI(TAG, "MQTT message published, msg_id=%d", event->msg_id);
-            s_mqtt_connection.stats.publish_count++;
             esp_event_post(MQTT_ADAPTER_EVENTS, MQTT_ADAPTER_EVENT_PUBLISHED, &event->msg_id, sizeof(int), portMAX_DELAY);
             break;
             
@@ -90,7 +80,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             break;
             
         case MQTT_EVENT_DATA:
-            ESP_LOGI(TAG, "MQTT message received on topic: %.*s", event->topic_len, event->topic);
+            ESP_LOGD(TAG, "MQTT message received on topic: %.*s", event->topic_len, event->topic);
             // For future implementation of command subscriptions
             break;
             
@@ -108,7 +98,7 @@ static void mqtt_adapter_wifi_event_handler(void* arg, esp_event_base_t event_ba
     if (event_base == WIFI_ADAPTER_EVENTS) {
         switch (event_id) {
             case WIFI_ADAPTER_EVENT_IP_OBTAINED:
-                ESP_LOGI(TAG, "WiFi IP obtained - starting MQTT client");
+                ESP_LOGD(TAG, "WiFi IP obtained - starting MQTT client");
                 if (s_adapter_initialized && s_mqtt_connection.state == MQTT_CONNECTION_STATE_INITIALIZED) {
                     esp_err_t ret = mqtt_adapter_start();
                     if (ret != ESP_OK) {
@@ -142,7 +132,7 @@ static esp_err_t mqtt_adapter_generate_client_id(void)
     snprintf(s_mqtt_connection.config.client_id, sizeof(s_mqtt_connection.config.client_id),
              "%s_%02X%02X%02X", CONFIG_MQTT_CLIENT_ID_PREFIX, mac[3], mac[4], mac[5]);
     
-    ESP_LOGI(TAG, "Generated MQTT client ID: %s", s_mqtt_connection.config.client_id);
+    ESP_LOGD(TAG, "Generated MQTT client ID: %s", s_mqtt_connection.config.client_id);
     return ESP_OK;
 }
 
@@ -175,7 +165,7 @@ static esp_err_t mqtt_adapter_configure_client(void)
         return ret;
     }
     
-    ESP_LOGI(TAG, "MQTT client configured successfully");
+    ESP_LOGD(TAG, "MQTT client configured successfully");
     return ESP_OK;
 }
 
@@ -184,7 +174,7 @@ static esp_err_t mqtt_adapter_configure_client(void)
  */
 static void mqtt_reconnect_timer_callback(void* arg)
 {
-    ESP_LOGI(TAG, "Reconnection timer triggered - attempting MQTT reconnection");
+    ESP_LOGD(TAG, "Reconnection timer triggered - attempting MQTT reconnection");
     
     if (s_mqtt_connection.state == MQTT_CONNECTION_STATE_DISCONNECTED || 
         s_mqtt_connection.state == MQTT_CONNECTION_STATE_ERROR) {
@@ -227,87 +217,59 @@ static esp_err_t mqtt_adapter_start_reconnect_timer(uint32_t delay_ms)
         }
     }
     
-    ESP_LOGI(TAG, "Scheduling MQTT reconnection in %" PRIu32 " ms", delay_ms);
+    ESP_LOGD(TAG, "Scheduling MQTT reconnection in %" PRIu32 " ms", delay_ms);
     return esp_timer_start_once(s_reconnect_timer, delay_ms * 1000); // Convert to microseconds
 }
 
 esp_err_t mqtt_adapter_init(void)
 {
     if (s_adapter_initialized) {
-        ESP_LOGW(TAG, "MQTT adapter already initialized");
         return ESP_OK;
     }
-    
-    ESP_LOGI(TAG, "Initializing MQTT adapter");
-    
+
     // Initialize connection entity
     memset(&s_mqtt_connection, 0, sizeof(mqtt_connection_t));
     s_mqtt_connection.state = MQTT_CONNECTION_STATE_UNINITIALIZED;
-    
+
     // Configure connection parameters
-    strncpy(s_mqtt_connection.config.broker_uri, CONFIG_MQTT_BROKER_URI, 
+    strncpy(s_mqtt_connection.config.broker_uri, CONFIG_MQTT_BROKER_URI,
             sizeof(s_mqtt_connection.config.broker_uri) - 1);
     s_mqtt_connection.config.keepalive_seconds = CONFIG_MQTT_KEEPALIVE_SECONDS;
     s_mqtt_connection.config.qos_level = CONFIG_MQTT_QOS_LEVEL;
     s_mqtt_connection.config.clean_session = true;
     s_mqtt_connection.stats.current_retry_delay_ms = CONFIG_MQTT_RECONNECT_INITIAL_DELAY_MS;
-    
-    // Generate client ID
-    esp_err_t ret = mqtt_adapter_generate_client_id();
-    if (ret != ESP_OK) {
-        return ret;
+
+    // Generate client ID and configure client
+    if (mqtt_adapter_generate_client_id() != ESP_OK ||
+        mqtt_adapter_configure_client() != ESP_OK ||
+        esp_event_handler_register(WIFI_ADAPTER_EVENTS, ESP_EVENT_ANY_ID,
+                                   &mqtt_adapter_wifi_event_handler, NULL) != ESP_OK) {
+        return ESP_FAIL;
     }
-    
-    // Configure MQTT client
-    ret = mqtt_adapter_configure_client();
-    if (ret != ESP_OK) {
-        return ret;
-    }
-    
-    // Register WiFi event handler
-    ret = esp_event_handler_register(WIFI_ADAPTER_EVENTS, ESP_EVENT_ANY_ID, 
-                                     &mqtt_adapter_wifi_event_handler, NULL);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register WiFi event handler: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
+
     s_mqtt_connection.state = MQTT_CONNECTION_STATE_INITIALIZED;
     s_adapter_initialized = true;
-    
-    ESP_LOGI(TAG, "MQTT adapter initialized successfully");
-    ESP_LOGI(TAG, "Broker URI: %s", s_mqtt_connection.config.broker_uri);
-    ESP_LOGI(TAG, "Client ID: %s", s_mqtt_connection.config.client_id);
-    
+
     esp_event_post(MQTT_ADAPTER_EVENTS, MQTT_ADAPTER_EVENT_INIT_COMPLETE, NULL, 0, portMAX_DELAY);
-    
+
     return ESP_OK;
 }
 
 esp_err_t mqtt_adapter_start(void)
 {
-    if (!s_adapter_initialized) {
-        ESP_LOGE(TAG, "MQTT adapter not initialized");
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    if (s_mqtt_connection.state == MQTT_CONNECTION_STATE_CONNECTED) {
-        ESP_LOGW(TAG, "MQTT client already connected");
+    if (!s_adapter_initialized || s_mqtt_connection.state == MQTT_CONNECTION_STATE_CONNECTED) {
         return ESP_OK;
     }
-    
-    ESP_LOGI(TAG, "Starting MQTT client");
+
     s_mqtt_connection.state = MQTT_CONNECTION_STATE_CONNECTING;
     esp_event_post(MQTT_ADAPTER_EVENTS, MQTT_ADAPTER_EVENT_CONNECTING, NULL, 0, portMAX_DELAY);
-    
+
     esp_err_t ret = esp_mqtt_client_start(s_mqtt_connection.mqtt_client_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start MQTT client: %s", esp_err_to_name(ret));
         s_mqtt_connection.state = MQTT_CONNECTION_STATE_ERROR;
-        return ret;
     }
-    
-    return ESP_OK;
+
+    return ret;
 }
 
 esp_err_t mqtt_adapter_stop(void)
@@ -317,7 +279,7 @@ esp_err_t mqtt_adapter_stop(void)
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Stopping MQTT client");
+    ESP_LOGD(TAG, "Stopping MQTT client");
     
     // Stop reconnection timer
     if (s_reconnect_timer != NULL) {
@@ -338,7 +300,7 @@ esp_err_t mqtt_adapter_stop(void)
 
 esp_err_t mqtt_adapter_deinit(void)
 {
-    ESP_LOGI(TAG, "Deinitializing MQTT adapter");
+    ESP_LOGD(TAG, "Deinitializing MQTT adapter");
     
     // Stop the client first
     mqtt_adapter_stop();
@@ -362,7 +324,7 @@ esp_err_t mqtt_adapter_deinit(void)
     memset(&s_mqtt_connection, 0, sizeof(mqtt_connection_t));
     s_adapter_initialized = false;
     
-    ESP_LOGI(TAG, "MQTT adapter deinitialized");
+    ESP_LOGD(TAG, "MQTT adapter deinitialized");
     return ESP_OK;
 }
 
@@ -400,7 +362,7 @@ esp_err_t mqtt_adapter_reconnect(void)
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Force reconnection requested");
+    ESP_LOGD(TAG, "Force reconnection requested");
     
     // Stop any running reconnection timer
     if (s_reconnect_timer != NULL) {
@@ -428,7 +390,7 @@ esp_err_t mqtt_adapter_publish_device_registration(void)
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Publishing device registration message");
+    ESP_LOGD(TAG, "Publishing device registration message");
     
     // Create device registration message
     device_registration_message_t reg_message = {0};
@@ -538,10 +500,10 @@ esp_err_t mqtt_adapter_publish_device_registration(void)
         ESP_LOGE(TAG, "Failed to publish device registration message");
         ret = ESP_FAIL;
     } else {
-        ESP_LOGI(TAG, "Device registration message published successfully");
-        ESP_LOGI(TAG, "Topic: %s", topic);
-        ESP_LOGI(TAG, "Message ID: %d", msg_id);
-        ESP_LOGI(TAG, "Payload: %s", json_string);
+        ESP_LOGD(TAG, "Device registration message published successfully");
+        ESP_LOGD(TAG, "Topic: %s", topic);
+        ESP_LOGD(TAG, "Message ID: %d", msg_id);
+        ESP_LOGD(TAG, "Payload: %s", json_string);
         
         s_mqtt_connection.device_registered = true;
         esp_event_post(MQTT_ADAPTER_EVENTS, MQTT_ADAPTER_EVENT_DEVICE_REGISTERED, &msg_id, sizeof(int), portMAX_DELAY);
@@ -572,7 +534,7 @@ esp_err_t mqtt_adapter_publish_sensor_data(const ambient_sensor_data_t *sensor_d
         return ESP_ERR_INVALID_STATE;
     }
     
-    ESP_LOGI(TAG, "Publishing sensor data message");
+    ESP_LOGD(TAG, "Publishing sensor data message");
     
     // Get MAC address
     uint8_t mac[6];
@@ -628,10 +590,10 @@ esp_err_t mqtt_adapter_publish_sensor_data(const ambient_sensor_data_t *sensor_d
         ESP_LOGE(TAG, "Failed to publish sensor data message");
         return ESP_FAIL;
     } else {
-        ESP_LOGI(TAG, "Sensor data message published successfully");
-        ESP_LOGI(TAG, "Topic: %s", topic);
-        ESP_LOGI(TAG, "Message ID: %d", msg_id);
-        ESP_LOGI(TAG, "Payload: %s", json_buffer);
+        ESP_LOGD(TAG, "Sensor data message published successfully");
+        ESP_LOGD(TAG, "Topic: %s", topic);
+        ESP_LOGD(TAG, "Message ID: %d", msg_id);
+        ESP_LOGD(TAG, "Payload: %s", json_buffer);
         return ESP_OK;
     }
 }
