@@ -14,6 +14,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <inttypes.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <arpa/inet.h>
 
 static const char *TAG = "mqtt_adapter";
 
@@ -72,9 +75,24 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             
         case MQTT_EVENT_ERROR:
             ESP_LOGE(TAG, "MQTT client error occurred");
+
+            // Enhanced error logging for diagnosis
+            if (event->error_handle) {
+                ESP_LOGE(TAG, "MQTT error type: %d", event->error_handle->error_type);
+                if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+                    ESP_LOGE(TAG, "TCP Transport error: %d", event->error_handle->esp_transport_sock_errno);
+                } else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
+                    ESP_LOGE(TAG, "Connection refused error: %d", event->error_handle->connect_return_code);
+                }
+            }
+
+            // Log current broker configuration for debugging
+            ESP_LOGE(TAG, "Failed broker URI: '%s'", s_mqtt_connection.config.broker_uri);
+            ESP_LOGE(TAG, "Client ID: '%s'", s_mqtt_connection.config.client_id);
+
             s_mqtt_connection.state = MQTT_CONNECTION_STATE_ERROR;
             esp_event_post(MQTT_ADAPTER_EVENTS, MQTT_ADAPTER_EVENT_ERROR, NULL, 0, portMAX_DELAY);
-            
+
             // Start reconnection timer on error
             mqtt_adapter_start_reconnect_timer(s_mqtt_connection.stats.current_retry_delay_ms);
             break;
@@ -141,6 +159,11 @@ static esp_err_t mqtt_adapter_generate_client_id(void)
  */
 static esp_err_t mqtt_adapter_configure_client(void)
 {
+    // Detailed logging for debugging hostname parsing
+    ESP_LOGI(TAG, "Configuring MQTT client with broker URI: '%s'", s_mqtt_connection.config.broker_uri);
+    ESP_LOGI(TAG, "Generated client ID: '%s'", s_mqtt_connection.config.client_id);
+    ESP_LOGI(TAG, "Keepalive: %d seconds", s_mqtt_connection.config.keepalive_seconds);
+
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = s_mqtt_connection.config.broker_uri,
         .credentials.client_id = s_mqtt_connection.config.client_id,
@@ -149,6 +172,18 @@ static esp_err_t mqtt_adapter_configure_client(void)
         .buffer.size = CONFIG_MQTT_ADAPTER_BUFFER_SIZE,
         .task.stack_size = CONFIG_MQTT_ADAPTER_TASK_STACK_SIZE,
     };
+
+    // Validate URI format
+    if (strlen(s_mqtt_connection.config.broker_uri) == 0) {
+        ESP_LOGE(TAG, "MQTT broker URI is empty!");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Check for malformed URI (colon at beginning)
+    if (s_mqtt_connection.config.broker_uri[0] == ':') {
+        ESP_LOGE(TAG, "MQTT broker URI starts with colon - malformed URI detected!");
+        return ESP_ERR_INVALID_ARG;
+    }
     
     s_mqtt_connection.mqtt_client_handle = esp_mqtt_client_init(&mqtt_cfg);
     if (s_mqtt_connection.mqtt_client_handle == NULL) {

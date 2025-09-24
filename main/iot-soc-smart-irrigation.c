@@ -171,14 +171,14 @@ void app_main(void)
     ESP_LOGI(TAG, "Inicializando sistema de recursos compartidos...");
     ESP_ERROR_CHECK(shared_resource_manager_init());
     
-    // Inicializar sensor DHT22 en GPIO_NUM_4
-    ESP_LOGI(TAG, "Inicializando sensor DHT22 en GPIO 4...");
-    ret = dht_sensor_init(GPIO_NUM_4);
+    // Inicializar sensor DHT22 en GPIO_NUM_18 (documentación estándar del proyecto)
+    ESP_LOGI(TAG, "Inicializando sensor DHT22 en GPIO 18...");
+    ret = dht_sensor_init(GPIO_NUM_18);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Error al inicializar sensor DHT22: %s", esp_err_to_name(ret));
         ESP_LOGE(TAG, "El sistema continuará sin sensor de temperatura/humedad");
     } else {
-        ESP_LOGI(TAG, "Sensor DHT22 inicializado correctamente en GPIO 4");
+        ESP_LOGI(TAG, "Sensor DHT22 inicializado correctamente en GPIO 18");
     }
     
     // Inicializar servicio de configuración del dispositivo

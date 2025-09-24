@@ -118,12 +118,23 @@ esp_err_t mqtt_adapter_publish_sensor_data(const ambient_sensor_data_t *sensor_d
 
 /**
  * @brief Force reconnection attempt
- * 
+ *
  * Triggers immediate reconnection attempt if not already connected.
- * 
+ *
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t mqtt_adapter_reconnect(void);
+
+/**
+ * @brief Test MQTT broker connectivity diagnostics
+ *
+ * Performs comprehensive connectivity tests including DNS resolution,
+ * TCP connection, and MQTT protocol validation. Used for debugging
+ * connection issues in rural deployment scenarios.
+ *
+ * @return ESP_OK if broker is reachable, error code otherwise
+ */
+esp_err_t mqtt_adapter_test_broker_connectivity(void);
 
 #ifdef __cplusplus
 }
