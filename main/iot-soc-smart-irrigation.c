@@ -26,13 +26,40 @@
 #include "publish_sensor_data.h"
 #include "process_mqtt_commands.h"
 
+// Fase 4 - Control de Riego - Headers
+#include "control_irrigation.h"
+#include "valve_control_driver.h"
+#include "soil_moisture_driver.h"
+#include "irrigation_logic.h"
+#include "safety_manager.h"
+#include "offline_mode_logic.h"
+#include "read_soil_sensors.h"
+
 static const char *TAG = "SMART_IRRIGATION_MAIN";
 static bool s_http_adapter_initialized = false;
+
+// Fase 4 - Control de Riego - Global state
+static control_irrigation_context_t g_irrigation_context;
+static bool s_irrigation_control_initialized = false;
 
 // Task configuration constants
 #define SENSOR_PUBLISH_TASK_STACK_SIZE    4096
 #define SENSOR_PUBLISH_TASK_PRIORITY      3  // Reduced from 5 to 3 - avoid priority inversion with HTTP/WiFi tasks
 #define SENSOR_PUBLISH_INTERVAL_MS        30000  // 30 seconds
+
+// Fase 4 - Control de Riego - Task configuration
+#define IRRIGATION_CONTROL_TASK_STACK_SIZE    8192
+#define IRRIGATION_CONTROL_TASK_PRIORITY      4
+#define IRRIGATION_EVALUATION_INTERVAL_MS     30000  // 30 seconds
+
+// GPIO Configuration for Phase 4
+#define VALVE_1_GPIO_PIN    GPIO_NUM_2   // Válvula principal
+#define VALVE_2_GPIO_PIN    GPIO_NUM_15  // Válvula secundaria (reservada)
+#define VALVE_3_GPIO_PIN    GPIO_NUM_16  // Válvula terciaria (reservada)
+
+#define SOIL_SENSOR_1_ADC_CHANNEL    ADC1_CHANNEL_0  // GPIO 36
+#define SOIL_SENSOR_2_ADC_CHANNEL    ADC1_CHANNEL_3  // GPIO 39
+#define SOIL_SENSOR_3_ADC_CHANNEL    ADC1_CHANNEL_6  // GPIO 34
 
 /**
  * @brief Sensor publishing task
@@ -143,6 +170,197 @@ static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
 }
 
 /**
+ * @brief Fase 4 - Tarea de control de riego
+ *
+ * Ejecuta la evaluación automática del sistema de riego cada 30 segundos.
+ * Lee sensores, aplica lógica de decisión y controla válvulas según sea necesario.
+ */
+static void irrigation_control_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "Starting irrigation control task (Core 1, Priority 4)");
+
+    TickType_t xLastWakeTime;
+    const TickType_t xFrequency = pdMS_TO_TICKS(IRRIGATION_EVALUATION_INTERVAL_MS);
+    uint32_t cycle_count = 0;
+
+    xLastWakeTime = xTaskGetTickCount();
+
+    while (1) {
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        cycle_count++;
+
+        if (!s_irrigation_control_initialized) {
+            ESP_LOGW(TAG, "Irrigation control not initialized - skipping cycle %" PRIu32, cycle_count);
+            continue;
+        }
+
+        control_irrigation_operation_result_t result = 
+            control_irrigation_execute_automatic_evaluation(&g_irrigation_context);
+
+        if (result.result_code != CONTROL_IRRIGATION_SUCCESS && 
+            result.result_code != CONTROL_IRRIGATION_NO_ACTION) {
+            ESP_LOGW(TAG, "Irrigation cycle %" PRIu32 " result: %s - %s",
+                     cycle_count, 
+                     control_irrigation_result_to_string(result.result_code),
+                     result.description);
+        }
+
+        if (cycle_count % 10 == 0) {
+            uint32_t total_eval, successful_ops, failed_ops;
+            control_irrigation_get_statistics(&g_irrigation_context, &total_eval, &successful_ops, &failed_ops);
+            
+            ESP_LOGI(TAG, "Irrigation cycle %" PRIu32 " - Eval: %" PRIu32 ", Success: %" PRIu32 ", Failed: %" PRIu32,
+                     cycle_count, total_eval, successful_ops, failed_ops);
+        }
+    }
+}
+
+/**
+ * @brief Fase 4 - Inicializar sistema de control de riego
+ *
+ * Inicializa todos los componentes de la Fase 4: drivers, servicios de dominio,
+ * casos de uso y configuración de seguridad.
+ */
+static esp_err_t initialize_irrigation_control_system(void)
+{
+    ESP_LOGI(TAG, "==============================================");
+    ESP_LOGI(TAG, "FASE 4 - Inicializando Sistema de Control de Riego");
+    ESP_LOGI(TAG, "==============================================");
+
+    // 1. Configurar límites de seguridad por defecto
+    safety_limits_t default_safety_limits = {
+        .soil_humidity = {
+            .critical_low_percent = 30.0f,      // Emergencia - riego inmediato
+            .warning_low_percent = 45.0f,       // Advertencia - programar riego
+            .target_min_percent = 70.0f,        // Objetivo mínimo
+            .target_max_percent = 75.0f,        // Objetivo máximo - PARAR
+            .emergency_high_percent = 80.0f     // Peligro - PARADA EMERGENCIA
+        },
+        .temperature = {
+            .night_irrigation_max = 32.0f,      // Máx temp para riego nocturno
+            .thermal_stress_min = 32.0f,        // Mín temp para estrés térmico
+            .emergency_stop_max = 40.0f,        // Parada por temperatura
+            .optimal_range_min = 26.0f,         // Rango óptimo
+            .optimal_range_max = 30.0f
+        },
+        .duration = {
+            .min_session_minutes = 2,           // Mínimo 2 minutos
+            .default_duration_minutes = 15,     // Por defecto 15 minutos
+            .max_session_minutes = 30,          // Máximo 30 minutos
+            .emergency_duration_minutes = 5     // Emergencia 5 minutos
+        }
+    };
+
+    // 2. Inicializar drivers de hardware
+    ESP_LOGI(TAG, "Inicializando drivers de hardware...");
+
+    // Driver de control de válvulas
+    valve_control_config_t valve_config = {
+        .valve_response_timeout_ms = 5000,
+        .relay_settling_time_ms = 100,
+        .interlock_delay_ms = 200,
+        .max_operation_duration_ms = 1800000, // 30 minutos
+        .enable_interlock_protection = true,
+        .enable_timeout_protection = true,
+        .enable_state_monitoring = true,
+        .monitoring_interval_ms = 1000,
+        .enable_power_optimization = true,
+        .relay_hold_reduction_delay_ms = 5000
+    };
+
+    esp_err_t ret = valve_control_driver_init(&valve_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al inicializar driver de válvulas: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "Driver de válvulas inicializado correctamente");
+
+    // Driver de sensores de suelo
+    soil_moisture_driver_config_t soil_config = {
+        .adc_attenuation = ADC_ATTEN_DB_11,
+        .adc_width = ADC_WIDTH_BIT_12,
+        .samples_per_reading = 5,
+        .sample_interval_ms = 50,
+        .enable_median_filter = true,
+        .enable_average_filter = true,
+        .enable_outlier_detection = true,
+        .outlier_threshold_std_dev = 2.0f,
+        .enable_auto_calibration = true,
+        .auto_calibration_interval_s = 86400, // 24 horas
+        .calibration_drift_threshold = 5.0f,
+        .enable_temperature_compensation = true,
+        .default_temperature_celsius = 25.0f,
+        .sensor_timeout_ms = 2000,
+        .max_consecutive_failures = 5
+    };
+
+    ret = soil_moisture_driver_init(&soil_config, 3); // 3 sensores
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al inicializar driver de sensores de suelo: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "Driver de sensores de suelo inicializado correctamente");
+
+    // 3. Inicializar servicios de dominio
+    ESP_LOGI(TAG, "Inicializando servicios de dominio...");
+
+    ret = safety_manager_init(&default_safety_limits);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al inicializar safety manager: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "Safety manager inicializado correctamente");
+
+    ret = irrigation_logic_init(&default_safety_limits);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al inicializar irrigation logic: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "Irrigation logic inicializado correctamente");
+
+    ret = offline_mode_logic_init(&default_safety_limits);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al inicializar offline mode logic: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "Offline mode logic inicializado correctamente");
+
+    // 4. Inicializar caso de uso principal
+    ESP_LOGI(TAG, "Inicializando caso de uso de control de riego...");
+
+    ret = control_irrigation_init_context(&g_irrigation_context, "AA:BB:CC:DD:EE:FF", &default_safety_limits);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al inicializar contexto de control de riego: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Configurar adapters (simplificado para esta implementación)
+    ret = control_irrigation_set_hardware_adapter(&g_irrigation_context, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al configurar hardware adapter: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = control_irrigation_set_mqtt_adapter(&g_irrigation_context, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al configurar MQTT adapter: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Marcar como inicializado
+    g_irrigation_context.state.is_initialized = true;
+    s_irrigation_control_initialized = true;
+
+    ESP_LOGI(TAG, "==============================================");
+    ESP_LOGI(TAG, "FASE 4 - Sistema de Control de Riego Inicializado");
+    ESP_LOGI(TAG, "Válvulas: GPIO %d, %d, %d", VALVE_1_GPIO_PIN, VALVE_2_GPIO_PIN, VALVE_3_GPIO_PIN);
+    ESP_LOGI(TAG, "Sensores suelo: ADC %d, %d, %d", SOIL_SENSOR_1_ADC_CHANNEL, SOIL_SENSOR_2_ADC_CHANNEL, SOIL_SENSOR_3_ADC_CHANNEL);
+    ESP_LOGI(TAG, "==============================================");
+
+    return ESP_OK;
+}
+
+/**
  * @brief Punto de entrada principal de la aplicación
  * 
  * Inicializa todos los componentes del sistema siguiendo los principios
@@ -231,6 +449,17 @@ void app_main(void)
     // read_sensors_init();
     // control_irrigation_init();
     
+    // Fase 4 - Inicializar sistema de control de riego
+    ESP_LOGI(TAG, "Inicializando Fase 4 - Sistema de Control de Riego...");
+    esp_err_t irrigation_ret = initialize_irrigation_control_system();
+    if (irrigation_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error crítico al inicializar sistema de riego: %s", esp_err_to_name(irrigation_ret));
+        ESP_LOGE(TAG, "El sistema continuará sin control de riego automático");
+        // No hacer ESP_ERROR_CHECK para permitir que el sistema continúe
+    } else {
+        ESP_LOGI(TAG, "Fase 4 - Sistema de control de riego inicializado correctamente");
+    }
+    
     // Crear tarea de publicación de sensores
     ESP_LOGI(TAG, "Creando tarea de publicación de sensores...");
     BaseType_t task_ret = xTaskCreatePinnedToCore(
@@ -248,6 +477,29 @@ void app_main(void)
         ESP_ERROR_CHECK(ESP_FAIL); // This will cause a restart
     } else {
         ESP_LOGI(TAG, "Tarea de publicación de sensores creada correctamente");
+    }
+    
+    // Fase 4 - Crear tarea de control de riego (solo si se inicializó correctamente)
+    if (s_irrigation_control_initialized) {
+        ESP_LOGI(TAG, "Creando tarea de control de riego...");
+        BaseType_t irrigation_task_ret = xTaskCreatePinnedToCore(
+            irrigation_control_task,               // Task function
+            "irrigation_control",                  // Task name
+            IRRIGATION_CONTROL_TASK_STACK_SIZE,   // Stack size
+            NULL,                                  // Task parameters
+            IRRIGATION_CONTROL_TASK_PRIORITY,     // Task priority (4)
+            NULL,                                  // Task handle
+            1                                      // Core 1
+        );
+        
+        if (irrigation_task_ret != pdPASS) {
+            ESP_LOGE(TAG, "Error al crear tarea de control de riego");
+            // No hacer ESP_ERROR_CHECK para permitir que el sistema continúe
+        } else {
+            ESP_LOGI(TAG, "Tarea de control de riego creada correctamente");
+        }
+    } else {
+        ESP_LOGW(TAG, "Sistema de riego no inicializado - tarea de control no creada");
     }
 
     // 4. Mensaje de inicialización completa

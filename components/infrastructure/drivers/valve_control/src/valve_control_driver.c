@@ -1,26 +1,25 @@
 /**
  * @file valve_control_driver.c
- * @brief Implementación del driver de control de válvulas
+ * @brief Implementación del driver de control de válvulas de riego
  *
  * Smart Irrigation System - ESP32 IoT Project
- * Hexagonal Architecture - Infrastructure Layer Driver
+ * Infrastructure Layer - Hardware Driver
  *
- * Sistema simplificado para 1 válvula principal con protecciones
- * de seguridad críticas para funcionamiento en campo rural.
+ * Controla válvulas solenoides a través de relés con protecciones de seguridad,
+ * monitoreo de estado y gestión de energía optimizada para operación con batería.
  *
  * Autor: Claude + Liwaisi Tech Team
- * Versión: 1.0.0 - Sistema Simplificado
+ * Versión: 1.4.0 - Valve Control Driver Implementation
  */
 
 #include "valve_control_driver.h"
-#include "irrigation_status.h"  // Para valve_status_t del dominio
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/timers.h"
+#include "freertos/semphr.h"
+#include "driver/gpio.h"
 #include <string.h>
-#include <math.h>
 #include <inttypes.h>
 
 static const char* TAG = "valve_control_driver";
@@ -30,48 +29,72 @@ static const char* TAG = "valve_control_driver";
 // ============================================================================
 
 /**
- * @brief Configuración por defecto para sistema simplificado (1 válvula)
+ * @brief Configuración por defecto del driver
  */
 static const valve_control_config_t DEFAULT_CONFIG = {
-    // Configuración temporal
-    .valve_response_timeout_ms = 3000,      // 3s timeout (reducido para batería)
-    .relay_settling_time_ms = 100,          // 100ms asentamiento relé
-    .interlock_delay_ms = 200,              // 200ms entre operaciones
-
-    // Configuración de seguridad (CRÍTICA para campo rural)
-    .max_operation_duration_ms = 1800000,   // 30 min máximo (1800000ms)
-    .enable_interlock_protection = true,    // Protección interlock ON
-    .enable_timeout_protection = true,      // Protección timeout ON
-
-    // Configuración de monitoreo
-    .enable_state_monitoring = true,        // Monitoreo estado ON
-    .monitoring_interval_ms = 2000,         // 2s intervalo (optimizado batería)
-
-    // Configuración de energía (CRÍTICA para batería)
-    .enable_power_optimization = true,      // Optimización energía ON
-    .relay_hold_reduction_delay_ms = 3000,  // 3s antes reducir corriente hold
+    .valve_response_timeout_ms = 5000,
+    .relay_settling_time_ms = 100,
+    .interlock_delay_ms = 200,
+    .max_operation_duration_ms = 1800000, // 30 minutos
+    .enable_interlock_protection = true,
+    .enable_timeout_protection = true,
+    .enable_state_monitoring = true,
+    .monitoring_interval_ms = 1000,
+    .enable_power_optimization = true,
+    .relay_hold_reduction_delay_ms = 5000
 };
 
 /**
  * @brief Estado global del driver
  */
-static struct {
-    bool driver_initialized;
+typedef struct {
+    bool is_initialized;
     valve_control_config_t config;
-    valve_status_t valve_status;            // Solo 1 válvula (sistema simplificado)
     valve_system_statistics_t statistics;
-    TimerHandle_t safety_timer;             // Timer para safety timeout
-    TimerHandle_t monitoring_timer;         // Timer para monitoreo periódico
-} g_valve_driver = {
-    .driver_initialized = false,
-};
+    
+    // Estado de válvulas individuales
+    struct {
+        valve_state_t state;
+        uint32_t operation_start_time;
+        uint32_t operation_duration_ms;
+        valve_error_type_t last_error;
+        uint32_t last_operation_timestamp;
+        bool is_emergency_stopped;
+    } valve_states[3];
+    
+    // Control de concurrencia
+    SemaphoreHandle_t operation_mutex;
+    SemaphoreHandle_t state_mutex;
+    
+    // Control de emergencia
+    bool emergency_stop_active;
+    uint32_t emergency_stop_timestamp;
+    char emergency_stop_reason[64];
+    
+    // Callback de eventos
+    valve_event_callback_t event_callback;
+    
+    // Task de monitoreo
+    TaskHandle_t monitoring_task_handle;
+    bool monitoring_task_running;
+    
+} valve_control_driver_state_t;
+
+static valve_control_driver_state_t g_driver_state = {0};
 
 // ============================================================================
-// FUNCIONES AUXILIARES PRIVADAS
+// FUNCIONES AUXILIARES INTERNAS
 // ============================================================================
 
 /**
- * @brief Obtener pin GPIO para válvula específica
+ * @brief Obtener timestamp actual en milisegundos
+ */
+static uint32_t get_current_timestamp_ms(void) {
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+/**
+ * @brief Obtener GPIO pin para válvula específica
  */
 static gpio_num_t get_valve_gpio_pin(uint8_t valve_number) {
     switch (valve_number) {
@@ -86,145 +109,171 @@ static gpio_num_t get_valve_gpio_pin(uint8_t valve_number) {
  * @brief Validar número de válvula
  */
 static bool is_valid_valve_number(uint8_t valve_number) {
-    // Sistema simplificado: solo válvula 1 activa
-    return (valve_number == 1);
+    return (valve_number >= 1 && valve_number <= 3);
 }
 
 /**
  * @brief Configurar GPIO para válvula
  */
-static esp_err_t configure_valve_gpio(uint8_t valve_number) {
-    if (!is_valid_valve_number(valve_number)) {
-        ESP_LOGE(TAG, "Invalid valve number for simplified system: %d", valve_number);
+static esp_err_t configure_valve_gpio(gpio_num_t pin) {
+    if (pin == GPIO_NUM_NC) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    gpio_num_t gpio_pin = get_valve_gpio_pin(valve_number);
-
-    gpio_config_t gpio_conf = {
-        .pin_bit_mask = (1ULL << gpio_pin),
+    
+    gpio_config_t io_conf = {
+        .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << pin),
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,  // Pull-down para estado seguro
-        .intr_type = GPIO_INTR_DISABLE
     };
-
-    esp_err_t ret = gpio_config(&gpio_conf);
+    
+    esp_err_t ret = gpio_config(&io_conf);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure GPIO %d for valve %d: %s",
-                 gpio_pin, valve_number, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to configure GPIO %d: %s", pin, esp_err_to_name(ret));
         return ret;
     }
-
-    // Establecer estado inicial cerrado (LOW = cerrado, HIGH = abierto)
-    gpio_set_level(gpio_pin, 0);
-
-    ESP_LOGI(TAG, "Valve %d configured on GPIO %d", valve_number, gpio_pin);
+    
+    // Inicializar en estado cerrado (LOW)
+    gpio_set_level(pin, 0);
+    
+    ESP_LOGI(TAG, "GPIO %d configured for valve control", pin);
     return ESP_OK;
 }
 
 /**
- * @brief Inicializar estado de válvula
+ * @brief Controlar relé de válvula
  */
-static void init_valve_status(uint8_t valve_number) {
-    valve_status_t* status = &g_valve_driver.valve_status;
-
-    memset(status, 0, sizeof(valve_status_t));
-
-    // Solo inicializar campos que existen en la estructura del dominio
-    status->state = VALVE_STATE_CLOSED;
-    status->start_timestamp = 0;
-    status->planned_stop_timestamp = 0;
-    status->current_duration_minutes = 0;
-    status->max_duration_minutes = 30; // 30 minutos por defecto
-    status->last_stop_timestamp = 0;
-    strcpy(status->last_stop_reason, "initialized");
-
-    ESP_LOGI(TAG, "Valve %d status initialized", valve_number);
+static esp_err_t control_valve_relay(uint8_t valve_number, bool open) {
+    if (!is_valid_valve_number(valve_number)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    gpio_num_t pin = get_valve_gpio_pin(valve_number);
+    if (pin == GPIO_NUM_NC) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // Controlar relé (HIGH = válvula abierta, LOW = válvula cerrada)
+    int level = open ? 1 : 0;
+    esp_err_t ret = gpio_set_level(pin, level);
+    
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Valve %d relay set to %s (GPIO %d = %d)", 
+                 valve_number, open ? "OPEN" : "CLOSED", pin, level);
+    } else {
+        ESP_LOGE(TAG, "Failed to control valve %d relay: %s", valve_number, esp_err_to_name(ret));
+    }
+    
+    return ret;
 }
 
 /**
- * @brief Callback del timer de safety timeout
+ * @brief Verificar estado físico del relé
  */
-static void safety_timer_callback(TimerHandle_t xTimer) {
-    ESP_LOGW(TAG, "Safety timeout triggered! Closing valve for protection");
-
-    // Cerrar válvula inmediatamente por seguridad
-    valve_control_driver_close_valve(1);
-
-    // Actualizar estadísticas
-    g_valve_driver.statistics.safety_stops++;
-    g_valve_driver.statistics.timeout_errors++;
-
-    // Registrar error en estado de válvula
-    // Campos last_error y error_count no existen en la estructura del dominio
-    ESP_LOGE(TAG, "Valve timeout detected");
-
-    ESP_LOGE(TAG, "Valve 1 closed by safety timeout after %.1f minutes",
-             g_valve_driver.config.max_operation_duration_ms / 60000.0);
+static bool get_valve_relay_state(uint8_t valve_number) {
+    if (!is_valid_valve_number(valve_number)) {
+        return false;
+    }
+    
+    gpio_num_t pin = get_valve_gpio_pin(valve_number);
+    if (pin == GPIO_NUM_NC) {
+        return false;
+    }
+    
+    return gpio_get_level(pin) == 1;
 }
 
 /**
- * @brief Callback del timer de monitoreo
+ * @brief Actualizar estado interno de válvula
  */
-static void monitoring_timer_callback(TimerHandle_t xTimer) {
-    valve_status_t* status = &g_valve_driver.valve_status;
-
-    // Verificar consistencia de estado GPIO vs lógico
-    // No podemos verificar el estado físico sin gpio_pin
-    // Solo verificar el estado lógico
-    bool expected_state = (status->state == VALVE_STATE_OPEN);
-
-    // No podemos verificar el estado físico sin gpio_pin
-    // Solo registrar el estado lógico actual
-    ESP_LOGD(TAG, "Valve state: %s", valve_control_driver_state_to_string(status->state));
-
-    // Actualizar tiempo total abierto si está en operación
-    if (status->state == VALVE_STATE_OPEN && status->start_timestamp > 0) {
-        uint32_t current_time = esp_timer_get_time() / 1000; // ms
-        uint32_t session_duration = current_time - status->start_timestamp;
-
-        // Log de información cada 5 minutos
-        if (session_duration % 300000 == 0) { // 300000ms = 5 min
-            ESP_LOGI(TAG, "Valve 1 has been open for %.1f minutes", session_duration / 60000.0);
+static void update_valve_state(uint8_t valve_number, valve_state_t new_state) {
+    if (!is_valid_valve_number(valve_number)) {
+        return;
+    }
+    
+    if (xSemaphoreTake(g_driver_state.state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        valve_state_t old_state = g_driver_state.valve_states[valve_number - 1].state;
+        g_driver_state.valve_states[valve_number - 1].state = new_state;
+        g_driver_state.valve_states[valve_number - 1].last_operation_timestamp = get_current_timestamp_ms();
+        
+        xSemaphoreGive(g_driver_state.state_mutex);
+        
+        // Notificar cambio de estado
+        if (old_state != new_state && g_driver_state.event_callback) {
+            g_driver_state.event_callback(valve_number, "state_change", &new_state);
         }
+        
+        ESP_LOGI(TAG, "Valve %d state changed: %s -> %s", 
+                 valve_number, 
+                 valve_control_driver_state_to_string(old_state),
+                 valve_control_driver_state_to_string(new_state));
     }
-
-    ESP_LOGD(TAG, "Monitoring: Valve 1 state=%s",
-             valve_control_driver_state_to_string(status->state));
 }
 
 /**
- * @brief Actualizar estadísticas de operación
+ * @brief Verificar timeout de operación
  */
-static void update_operation_statistics(uint8_t valve_number, bool operation_successful,
-                                      uint16_t response_time_ms, bool is_open_operation) {
-    valve_system_statistics_t* stats = &g_valve_driver.statistics;
-    valve_status_t* status = &g_valve_driver.valve_status;
-
-    // Actualizar contadores globales
-    if (is_open_operation) {
-        stats->total_open_commands++;
-    } else {
-        stats->total_close_commands++;
+static bool check_operation_timeout(uint8_t valve_number) {
+    if (!is_valid_valve_number(valve_number)) {
+        return false;
     }
-
-    if (operation_successful) {
-        stats->successful_operations++;
-    } else {
-        stats->failed_operations++;
+    
+    uint32_t current_time = get_current_timestamp_ms();
+    uint32_t start_time = g_driver_state.valve_states[valve_number - 1].operation_start_time;
+    uint32_t duration = g_driver_state.valve_states[valve_number - 1].operation_duration_ms;
+    
+    if (start_time > 0 && duration > 0) {
+        return (current_time - start_time) >= duration;
     }
+    
+    return false;
+}
 
-    // Actualizar tiempo promedio de respuesta
-    if (response_time_ms > 0) {
-        float total_operations = stats->successful_operations + stats->failed_operations;
-        stats->average_response_time_ms =
-            (stats->average_response_time_ms * (total_operations - 1) + response_time_ms) / total_operations;
+/**
+ * @brief Task de monitoreo de válvulas
+ */
+static void valve_monitoring_task(void *pvParameters) {
+    ESP_LOGI(TAG, "Valve monitoring task started");
+    
+    while (g_driver_state.monitoring_task_running) {
+        if (g_driver_state.config.enable_state_monitoring) {
+            // Verificar timeouts de operación
+            for (uint8_t valve = 1; valve <= 3; valve++) {
+                if (g_driver_state.valve_states[valve - 1].state == VALVE_STATE_OPEN) {
+                    if (check_operation_timeout(valve)) {
+                        ESP_LOGW(TAG, "Valve %d operation timeout detected", valve);
+                        
+                        if (g_driver_state.config.enable_timeout_protection) {
+                            valve_control_driver_close_valve(valve);
+                            g_driver_state.statistics.timeout_errors++;
+                            
+                            if (g_driver_state.event_callback) {
+                                g_driver_state.event_callback(valve, "timeout", NULL);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Verificar estado de emergencia
+            if (g_driver_state.emergency_stop_active) {
+                // Asegurar que todas las válvulas estén cerradas
+                for (uint8_t valve = 1; valve <= 3; valve++) {
+                    if (g_driver_state.valve_states[valve - 1].state == VALVE_STATE_OPEN) {
+                        ESP_LOGW(TAG, "Emergency stop: forcing valve %d to close", valve);
+                        control_valve_relay(valve, false);
+                        update_valve_state(valve, VALVE_STATE_CLOSED);
+                    }
+                }
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(g_driver_state.config.monitoring_interval_ms));
     }
-
-    ESP_LOGD(TAG, "Stats updated: successful=%" PRIu32 ", failed=%" PRIu32 ", avg_time=%.1fms",
-             stats->successful_operations, stats->failed_operations,
-             stats->average_response_time_ms);
+    
+    ESP_LOGI(TAG, "Valve monitoring task stopped");
+    vTaskDelete(NULL);
 }
 
 // ============================================================================
@@ -232,104 +281,102 @@ static void update_operation_statistics(uint8_t valve_number, bool operation_suc
 // ============================================================================
 
 esp_err_t valve_control_driver_init(const valve_control_config_t* config) {
-    if (g_valve_driver.driver_initialized) {
-        ESP_LOGW(TAG, "Driver already initialized");
-        return ESP_OK;
-    }
-
-    ESP_LOGI(TAG, "Initializing valve control driver (simplified system - 1 valve)");
-
-    // Usar configuración proporcionada o por defecto
+    ESP_LOGI(TAG, "Initializing valve control driver");
+    
+    // Limpiar estado
+    memset(&g_driver_state, 0, sizeof(valve_control_driver_state_t));
+    
+    // Copiar configuración
     if (config) {
-        memcpy(&g_valve_driver.config, config, sizeof(valve_control_config_t));
+        memcpy(&g_driver_state.config, config, sizeof(valve_control_config_t));
     } else {
-        memcpy(&g_valve_driver.config, &DEFAULT_CONFIG, sizeof(valve_control_config_t));
-        ESP_LOGI(TAG, "Using default configuration");
+        memcpy(&g_driver_state.config, &DEFAULT_CONFIG, sizeof(valve_control_config_t));
     }
-
-    // Configurar GPIO para válvula 1 (sistema simplificado)
-    esp_err_t ret = configure_valve_gpio(1);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure valve GPIO");
-        return ret;
-    }
-
-    // Inicializar estado de válvula
-    init_valve_status(1);
-
-    // Inicializar estadísticas
-    memset(&g_valve_driver.statistics, 0, sizeof(valve_system_statistics_t));
-
-    // Crear timer de safety timeout
-    g_valve_driver.safety_timer = xTimerCreate(
-        "valve_safety_timer",
-        pdMS_TO_TICKS(g_valve_driver.config.max_operation_duration_ms),
-        pdFALSE,  // One-shot timer
-        NULL,
-        safety_timer_callback
-    );
-
-    if (!g_valve_driver.safety_timer) {
-        ESP_LOGE(TAG, "Failed to create safety timer");
+    
+    // Crear mutexes
+    g_driver_state.operation_mutex = xSemaphoreCreateMutex();
+    g_driver_state.state_mutex = xSemaphoreCreateMutex();
+    
+    if (!g_driver_state.operation_mutex || !g_driver_state.state_mutex) {
+        ESP_LOGE(TAG, "Failed to create mutexes");
         return ESP_ERR_NO_MEM;
     }
-
-    // Crear timer de monitoreo periódico
-    if (g_valve_driver.config.enable_state_monitoring) {
-        g_valve_driver.monitoring_timer = xTimerCreate(
-            "valve_monitoring_timer",
-            pdMS_TO_TICKS(g_valve_driver.config.monitoring_interval_ms),
-            pdTRUE,  // Periodic timer
-            NULL,
-            monitoring_timer_callback
-        );
-
-        if (!g_valve_driver.monitoring_timer) {
-            ESP_LOGE(TAG, "Failed to create monitoring timer");
-            return ESP_ERR_NO_MEM;
+    
+    // Configurar GPIOs para válvulas
+    esp_err_t ret = ESP_OK;
+    for (uint8_t valve = 1; valve <= 3; valve++) {
+        gpio_num_t pin = get_valve_gpio_pin(valve);
+        ret = configure_valve_gpio(pin);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to configure valve %d GPIO", valve);
+            return ret;
         }
-
-        // Iniciar timer de monitoreo
-        xTimerStart(g_valve_driver.monitoring_timer, 0);
-        ESP_LOGI(TAG, "Monitoring timer started with %dms interval",
-                 g_valve_driver.config.monitoring_interval_ms);
+        
+        // Inicializar estado de válvula
+        g_driver_state.valve_states[valve - 1].state = VALVE_STATE_CLOSED;
+        g_driver_state.valve_states[valve - 1].last_error = VALVE_ERROR_NONE;
     }
-
-    g_valve_driver.driver_initialized = true;
+    
+    // Inicializar estadísticas
+    memset(&g_driver_state.statistics, 0, sizeof(valve_system_statistics_t));
+    
+    // Crear task de monitoreo
+    g_driver_state.monitoring_task_running = true;
+    BaseType_t task_ret = xTaskCreate(
+        valve_monitoring_task,
+        "valve_monitor",
+        2048,
+        NULL,
+        2,
+        &g_driver_state.monitoring_task_handle
+    );
+    
+    if (task_ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create monitoring task");
+        g_driver_state.monitoring_task_running = false;
+        return ESP_ERR_NO_MEM;
+    }
+    
+    g_driver_state.is_initialized = true;
+    
     ESP_LOGI(TAG, "Valve control driver initialized successfully");
-
+    ESP_LOGI(TAG, "Valve 1: GPIO %d, Valve 2: GPIO %d, Valve 3: GPIO %d", 
+             VALVE_1_GPIO_PIN, VALVE_2_GPIO_PIN, VALVE_3_GPIO_PIN);
+    
     return ESP_OK;
 }
 
 esp_err_t valve_control_driver_deinit(void) {
-    if (!g_valve_driver.driver_initialized) {
-        return ESP_OK; // Ya desinicializado
-    }
-
     ESP_LOGI(TAG, "Deinitializing valve control driver");
-
-    // Cerrar todas las válvulas antes de desinicializar
+    
+    if (!g_driver_state.is_initialized) {
+        return ESP_OK;
+    }
+    
+    // Parar task de monitoreo
+    g_driver_state.monitoring_task_running = false;
+    if (g_driver_state.monitoring_task_handle) {
+        vTaskDelete(g_driver_state.monitoring_task_handle);
+        g_driver_state.monitoring_task_handle = NULL;
+    }
+    
+    // Cerrar todas las válvulas
     valve_control_driver_close_all_valves();
-
-    // Detener y eliminar timers
-    if (g_valve_driver.safety_timer) {
-        xTimerStop(g_valve_driver.safety_timer, portMAX_DELAY);
-        xTimerDelete(g_valve_driver.safety_timer, portMAX_DELAY);
-        g_valve_driver.safety_timer = NULL;
+    
+    // Liberar mutexes
+    if (g_driver_state.operation_mutex) {
+        vSemaphoreDelete(g_driver_state.operation_mutex);
+        g_driver_state.operation_mutex = NULL;
     }
-
-    if (g_valve_driver.monitoring_timer) {
-        xTimerStop(g_valve_driver.monitoring_timer, portMAX_DELAY);
-        xTimerDelete(g_valve_driver.monitoring_timer, portMAX_DELAY);
-        g_valve_driver.monitoring_timer = NULL;
+    
+    if (g_driver_state.state_mutex) {
+        vSemaphoreDelete(g_driver_state.state_mutex);
+        g_driver_state.state_mutex = NULL;
     }
-
-    // Resetear GPIO a estado seguro
-    gpio_set_level(VALVE_1_GPIO_PIN, 0);  // Asegurar válvula cerrada
-
-    g_valve_driver.driver_initialized = false;
+    
+    g_driver_state.is_initialized = false;
+    
     ESP_LOGI(TAG, "Valve control driver deinitialized");
-
     return ESP_OK;
 }
 
@@ -338,148 +385,163 @@ esp_err_t valve_control_driver_deinit(void) {
 // ============================================================================
 
 esp_err_t valve_control_driver_open_valve(uint8_t valve_number) {
-    if (!g_valve_driver.driver_initialized) {
+    if (!g_driver_state.is_initialized) {
         ESP_LOGE(TAG, "Driver not initialized");
         return ESP_ERR_INVALID_STATE;
     }
-
+    
     if (!is_valid_valve_number(valve_number)) {
-        ESP_LOGE(TAG, "Invalid valve number for simplified system: %d", valve_number);
+        ESP_LOGE(TAG, "Invalid valve number: %d", valve_number);
         return ESP_ERR_INVALID_ARG;
     }
-
-    valve_status_t* status = &g_valve_driver.valve_status;
-
-    // Verificar si ya está abierta
-    if (status->state == VALVE_STATE_OPEN) {
-        ESP_LOGW(TAG, "Valve %d already open", valve_number);
+    
+    if (xSemaphoreTake(g_driver_state.operation_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to acquire operation mutex");
+        return ESP_ERR_TIMEOUT;
+    }
+    
+    // Verificar estado de emergencia
+    if (g_driver_state.emergency_stop_active) {
+        ESP_LOGW(TAG, "Cannot open valve %d: emergency stop active", valve_number);
+        xSemaphoreGive(g_driver_state.operation_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Verificar interlock si está habilitado
+    if (g_driver_state.config.enable_interlock_protection) {
+        if (valve_control_driver_has_open_valves()) {
+            ESP_LOGW(TAG, "Cannot open valve %d: interlock protection active", valve_number);
+            xSemaphoreGive(g_driver_state.operation_mutex);
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+    
+    // Verificar si la válvula ya está abierta
+    if (g_driver_state.valve_states[valve_number - 1].state == VALVE_STATE_OPEN) {
+        ESP_LOGI(TAG, "Valve %d is already open", valve_number);
+        xSemaphoreGive(g_driver_state.operation_mutex);
         return ESP_OK;
     }
-
+    
     ESP_LOGI(TAG, "Opening valve %d", valve_number);
-
-    uint32_t operation_start = esp_timer_get_time() / 1000; // ms
-
-    // Actualizar estado a "abriendo"
-    status->state = VALVE_STATE_OPENING;
-
-    // No podemos controlar GPIO sin gpio_pin
-    ESP_LOGI(TAG, "Valve %d opening (GPIO control not available)", valve_number);
-
-    // Esperar tiempo de asentamiento del relé
-    vTaskDelay(pdMS_TO_TICKS(g_valve_driver.config.relay_settling_time_ms));
-
-    // Válvula abierta exitosamente
-    status->state = VALVE_STATE_OPEN;
-    status->start_timestamp = operation_start;
-
-    // Calcular tiempo de respuesta
-    uint32_t operation_end = esp_timer_get_time() / 1000; // ms
-    uint16_t response_time = (uint16_t)(operation_end - operation_start);
-
-    // Actualizar estadísticas
-    update_operation_statistics(valve_number, true, response_time, true);
-
-    // Iniciar timer de safety timeout si está habilitado
-    if (g_valve_driver.config.enable_timeout_protection && g_valve_driver.safety_timer) {
-        xTimerStart(g_valve_driver.safety_timer, 0);
-        ESP_LOGI(TAG, "Safety timer started for %.1f minutes maximum operation",
-                 g_valve_driver.config.max_operation_duration_ms / 60000.0);
+    
+    // Actualizar estado a abriéndose
+    update_valve_state(valve_number, VALVE_STATE_OPENING);
+    
+    // Controlar relé
+    esp_err_t ret = control_valve_relay(valve_number, true);
+    if (ret != ESP_OK) {
+        update_valve_state(valve_number, VALVE_STATE_ERROR);
+        g_driver_state.valve_states[valve_number - 1].last_error = VALVE_ERROR_GPIO_FAILURE;
+        g_driver_state.statistics.failed_operations++;
+        xSemaphoreGive(g_driver_state.operation_mutex);
+        return ret;
     }
-
-    ESP_LOGI(TAG, "Valve %d opened successfully in %dms", valve_number, response_time);
-
+    
+    // Esperar tiempo de asentamiento del relé
+    vTaskDelay(pdMS_TO_TICKS(g_driver_state.config.relay_settling_time_ms));
+    
+    // Actualizar estado a abierta
+    update_valve_state(valve_number, VALVE_STATE_OPEN);
+    g_driver_state.valve_states[valve_number - 1].operation_start_time = get_current_timestamp_ms();
+    g_driver_state.valve_states[valve_number - 1].operation_duration_ms = g_driver_state.config.max_operation_duration_ms;
+    
+    // Actualizar estadísticas
+    g_driver_state.statistics.total_open_commands++;
+    g_driver_state.statistics.successful_operations++;
+    
+    xSemaphoreGive(g_driver_state.operation_mutex);
+    
+    ESP_LOGI(TAG, "Valve %d opened successfully", valve_number);
     return ESP_OK;
 }
 
 esp_err_t valve_control_driver_close_valve(uint8_t valve_number) {
-    if (!g_valve_driver.driver_initialized) {
+    if (!g_driver_state.is_initialized) {
         ESP_LOGE(TAG, "Driver not initialized");
         return ESP_ERR_INVALID_STATE;
     }
-
+    
     if (!is_valid_valve_number(valve_number)) {
-        ESP_LOGE(TAG, "Invalid valve number for simplified system: %d", valve_number);
+        ESP_LOGE(TAG, "Invalid valve number: %d", valve_number);
         return ESP_ERR_INVALID_ARG;
     }
-
-    valve_status_t* status = &g_valve_driver.valve_status;
-
-    // Verificar si ya está cerrada
-    if (status->state == VALVE_STATE_CLOSED) {
-        ESP_LOGW(TAG, "Valve %d already closed", valve_number);
+    
+    if (xSemaphoreTake(g_driver_state.operation_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to acquire operation mutex");
+        return ESP_ERR_TIMEOUT;
+    }
+    
+    // Verificar si la válvula ya está cerrada
+    if (g_driver_state.valve_states[valve_number - 1].state == VALVE_STATE_CLOSED) {
+        ESP_LOGI(TAG, "Valve %d is already closed", valve_number);
+        xSemaphoreGive(g_driver_state.operation_mutex);
         return ESP_OK;
     }
-
+    
     ESP_LOGI(TAG, "Closing valve %d", valve_number);
-
-    uint32_t operation_start = esp_timer_get_time() / 1000; // ms
-
-    // Actualizar estado a "cerrando"
-    status->state = VALVE_STATE_CLOSING;
-
-    // Detener timer de safety si está activo
-    if (g_valve_driver.safety_timer && xTimerIsTimerActive(g_valve_driver.safety_timer)) {
-        xTimerStop(g_valve_driver.safety_timer, 0);
-        ESP_LOGI(TAG, "Safety timer stopped");
+    
+    // Actualizar estado a cerrándose
+    update_valve_state(valve_number, VALVE_STATE_CLOSING);
+    
+    // Controlar relé
+    esp_err_t ret = control_valve_relay(valve_number, false);
+    if (ret != ESP_OK) {
+        update_valve_state(valve_number, VALVE_STATE_ERROR);
+        g_driver_state.valve_states[valve_number - 1].last_error = VALVE_ERROR_GPIO_FAILURE;
+        g_driver_state.statistics.failed_operations++;
+        xSemaphoreGive(g_driver_state.operation_mutex);
+        return ret;
     }
-
-    // Calcular tiempo total de la sesión si estuvo abierta
-    if (status->start_timestamp > 0) {
-        uint32_t session_duration = operation_start - status->start_timestamp;
-        // Campo total_open_time_ms no existe en la estructura del dominio
-        g_valve_driver.statistics.total_irrigation_time_ms += session_duration;
-        status->start_timestamp = 0;
-
-        ESP_LOGI(TAG, "Session duration: %.1f minutes", session_duration / 60000.0);
-    }
-
-    // Desactivar GPIO (LOW = válvula cerrada)
-    // No podemos controlar GPIO sin gpio_pin
-    ESP_LOGI(TAG, "Valve %d closed (GPIO control not available)", valve_number);
-
+    
     // Esperar tiempo de asentamiento del relé
-    vTaskDelay(pdMS_TO_TICKS(g_valve_driver.config.relay_settling_time_ms));
-
-    // No podemos verificar GPIO sin gpio_pin
-    ESP_LOGI(TAG, "Valve %d close verification completed", valve_number);
-
-    // Válvula cerrada exitosamente
-    status->state = VALVE_STATE_CLOSED;
-    // Campo is_relay_energized no existe en la estructura del dominio
-    status->last_stop_timestamp = operation_start;
-    // Campo last_error no existe en la estructura del dominio
-
-    // Calcular tiempo de respuesta
-    uint32_t operation_end = esp_timer_get_time() / 1000; // ms
-    uint16_t response_time = (uint16_t)(operation_end - operation_start);
-
+    vTaskDelay(pdMS_TO_TICKS(g_driver_state.config.relay_settling_time_ms));
+    
+    // Actualizar estado a cerrada
+    update_valve_state(valve_number, VALVE_STATE_CLOSED);
+    
+    // Calcular tiempo de operación
+    uint32_t current_time = get_current_timestamp_ms();
+    uint32_t start_time = g_driver_state.valve_states[valve_number - 1].operation_start_time;
+    if (start_time > 0) {
+        uint32_t operation_time = current_time - start_time;
+        g_driver_state.statistics.total_irrigation_time_ms += operation_time;
+    }
+    
+    // Limpiar estado de operación
+    g_driver_state.valve_states[valve_number - 1].operation_start_time = 0;
+    g_driver_state.valve_states[valve_number - 1].operation_duration_ms = 0;
+    
     // Actualizar estadísticas
-    update_operation_statistics(valve_number, true, response_time, false);
-
-    ESP_LOGI(TAG, "Valve %d closed successfully in %dms", valve_number, response_time);
-
+    g_driver_state.statistics.total_close_commands++;
+    g_driver_state.statistics.successful_operations++;
+    
+    xSemaphoreGive(g_driver_state.operation_mutex);
+    
+    ESP_LOGI(TAG, "Valve %d closed successfully", valve_number);
     return ESP_OK;
 }
 
 esp_err_t valve_control_driver_close_all_valves(void) {
-    if (!g_valve_driver.driver_initialized) {
-        ESP_LOGE(TAG, "Driver not initialized");
-        return ESP_ERR_INVALID_STATE;
+    ESP_LOGI(TAG, "Closing all valves");
+    
+    esp_err_t ret = ESP_OK;
+    esp_err_t last_error = ESP_OK;
+    
+    for (uint8_t valve = 1; valve <= 3; valve++) {
+        esp_err_t valve_ret = valve_control_driver_close_valve(valve);
+        if (valve_ret != ESP_OK) {
+            last_error = valve_ret;
+            ret = ESP_FAIL;
+        }
     }
-
-    ESP_LOGI(TAG, "Closing all valves (emergency stop)");
-
-    // En sistema simplificado, solo cerrar válvula 1
-    esp_err_t ret = valve_control_driver_close_valve(1);
-
+    
     if (ret == ESP_OK) {
-        g_valve_driver.statistics.safety_stops++;
-        ESP_LOGI(TAG, "All valves closed successfully (emergency stop completed)");
+        ESP_LOGI(TAG, "All valves closed successfully");
     } else {
-        ESP_LOGE(TAG, "Failed to close valve 1 during emergency stop");
+        ESP_LOGE(TAG, "Some valves failed to close, last error: %s", esp_err_to_name(last_error));
     }
-
+    
     return ret;
 }
 
@@ -488,11 +550,11 @@ esp_err_t valve_control_driver_close_all_valves(void) {
 // ============================================================================
 
 valve_state_t valve_control_driver_get_valve_state(uint8_t valve_number) {
-    if (!g_valve_driver.driver_initialized || !is_valid_valve_number(valve_number)) {
+    if (!g_driver_state.is_initialized || !is_valid_valve_number(valve_number)) {
         return VALVE_STATE_ERROR;
     }
-
-    return g_valve_driver.valve_status.state;
+    
+    return g_driver_state.valve_states[valve_number - 1].state;
 }
 
 bool valve_control_driver_is_valve_open(uint8_t valve_number) {
@@ -503,42 +565,96 @@ bool valve_control_driver_is_valve_closed(uint8_t valve_number) {
     return valve_control_driver_get_valve_state(valve_number) == VALVE_STATE_CLOSED;
 }
 
-bool valve_control_driver_are_all_valves_closed(void) {
-    // Sistema simplificado: verificar solo válvula 1
-    return valve_control_driver_is_valve_closed(1);
+bool valve_control_driver_has_open_valves(void) {
+    for (uint8_t valve = 1; valve <= 3; valve++) {
+        if (valve_control_driver_is_valve_open(valve)) {
+            return true;
+        }
+    }
+    return false;
 }
 
-bool valve_control_driver_has_any_valve_open(void) {
-    // Sistema simplificado: verificar solo válvula 1
-    return valve_control_driver_is_valve_open(1);
+uint8_t valve_control_driver_get_open_valve_count(void) {
+    uint8_t count = 0;
+    for (uint8_t valve = 1; valve <= 3; valve++) {
+        if (valve_control_driver_is_valve_open(valve)) {
+            count++;
+        }
+    }
+    return count;
 }
 
-esp_err_t valve_control_driver_get_valve_status(uint8_t valve_number, valve_status_t* status) {
-    if (!g_valve_driver.driver_initialized) {
+uint32_t valve_control_driver_get_valve_open_time(uint8_t valve_number) {
+    if (!g_driver_state.is_initialized || !is_valid_valve_number(valve_number)) {
+        return 0;
+    }
+    
+    if (g_driver_state.valve_states[valve_number - 1].state != VALVE_STATE_OPEN) {
+        return 0;
+    }
+    
+    uint32_t current_time = get_current_timestamp_ms();
+    uint32_t start_time = g_driver_state.valve_states[valve_number - 1].operation_start_time;
+    
+    if (start_time > 0) {
+        return current_time - start_time;
+    }
+    
+    return 0;
+}
+
+// ============================================================================
+// FUNCIONES PÚBLICAS - CONTROL DE EMERGENCIA
+// ============================================================================
+
+esp_err_t valve_control_driver_emergency_stop(const char* reason) {
+    ESP_LOGW(TAG, "Emergency stop activated: %s", reason ? reason : "Unknown reason");
+    
+    if (!g_driver_state.is_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
-
-    if (!is_valid_valve_number(valve_number) || !status) {
-        return ESP_ERR_INVALID_ARG;
+    
+    // Activar flag de emergencia
+    g_driver_state.emergency_stop_active = true;
+    g_driver_state.emergency_stop_timestamp = get_current_timestamp_ms();
+    
+    if (reason) {
+        strncpy(g_driver_state.emergency_stop_reason, reason, sizeof(g_driver_state.emergency_stop_reason) - 1);
+        g_driver_state.emergency_stop_reason[sizeof(g_driver_state.emergency_stop_reason) - 1] = '\0';
     }
-
-    memcpy(status, &g_valve_driver.valve_status, sizeof(valve_status_t));
-    return ESP_OK;
+    
+    // Cerrar todas las válvulas inmediatamente
+    esp_err_t ret = valve_control_driver_close_all_valves();
+    
+    // Actualizar estadísticas
+    g_driver_state.statistics.safety_stops++;
+    
+    // Notificar evento
+    if (g_driver_state.event_callback) {
+        g_driver_state.event_callback(0, "emergency_stop", (void*)reason);
+    }
+    
+    ESP_LOGW(TAG, "Emergency stop completed");
+    return ret;
 }
 
-uint32_t valve_control_driver_get_valve_open_duration(uint8_t valve_number) {
-    if (!g_valve_driver.driver_initialized || !is_valid_valve_number(valve_number)) {
-        return 0;
+bool valve_control_driver_is_emergency_stopped(void) {
+    return g_driver_state.emergency_stop_active;
+}
+
+esp_err_t valve_control_driver_reset_emergency_stop(void) {
+    ESP_LOGI(TAG, "Resetting emergency stop");
+    
+    if (!g_driver_state.is_initialized) {
+        return ESP_ERR_INVALID_STATE;
     }
-
-    valve_status_t* status = &g_valve_driver.valve_status;
-
-    if (status->state != VALVE_STATE_OPEN || status->start_timestamp == 0) {
-        return 0;
-    }
-
-    uint32_t current_time = esp_timer_get_time() / 1000; // ms
-    return current_time - status->start_timestamp;
+    
+    g_driver_state.emergency_stop_active = false;
+    g_driver_state.emergency_stop_timestamp = 0;
+    memset(g_driver_state.emergency_stop_reason, 0, sizeof(g_driver_state.emergency_stop_reason));
+    
+    ESP_LOGI(TAG, "Emergency stop reset completed");
+    return ESP_OK;
 }
 
 // ============================================================================
@@ -546,138 +662,106 @@ uint32_t valve_control_driver_get_valve_open_duration(uint8_t valve_number) {
 // ============================================================================
 
 esp_err_t valve_control_driver_set_config(const valve_control_config_t* config) {
-    if (!g_valve_driver.driver_initialized || !config) {
+    if (!config) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    memcpy(&g_valve_driver.config, config, sizeof(valve_control_config_t));
-    ESP_LOGI(TAG, "Configuration updated");
-    return ESP_OK;
+    
+    if (xSemaphoreTake(g_driver_state.state_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        memcpy(&g_driver_state.config, config, sizeof(valve_control_config_t));
+        xSemaphoreGive(g_driver_state.state_mutex);
+        
+        ESP_LOGI(TAG, "Configuration updated");
+        return ESP_OK;
+    }
+    
+    return ESP_ERR_TIMEOUT;
 }
 
 esp_err_t valve_control_driver_get_config(valve_control_config_t* config) {
-    if (!g_valve_driver.driver_initialized || !config) {
+    if (!config) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    memcpy(config, &g_valve_driver.config, sizeof(valve_control_config_t));
-    return ESP_OK;
+    
+    if (xSemaphoreTake(g_driver_state.state_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        memcpy(config, &g_driver_state.config, sizeof(valve_control_config_t));
+        xSemaphoreGive(g_driver_state.state_mutex);
+        return ESP_OK;
+    }
+    
+    return ESP_ERR_TIMEOUT;
 }
 
 esp_err_t valve_control_driver_get_statistics(valve_system_statistics_t* stats) {
-    if (!g_valve_driver.driver_initialized || !stats) {
+    if (!stats) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    memcpy(stats, &g_valve_driver.statistics, sizeof(valve_system_statistics_t));
-    return ESP_OK;
+    
+    if (xSemaphoreTake(g_driver_state.state_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        memcpy(stats, &g_driver_state.statistics, sizeof(valve_system_statistics_t));
+        xSemaphoreGive(g_driver_state.state_mutex);
+        return ESP_OK;
+    }
+    
+    return ESP_ERR_TIMEOUT;
 }
 
 esp_err_t valve_control_driver_reset_statistics(void) {
-    if (!g_valve_driver.driver_initialized) {
-        return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(g_driver_state.state_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        memset(&g_driver_state.statistics, 0, sizeof(valve_system_statistics_t));
+        xSemaphoreGive(g_driver_state.state_mutex);
+        
+        ESP_LOGI(TAG, "Statistics reset");
+        return ESP_OK;
     }
-
-    memset(&g_valve_driver.statistics, 0, sizeof(valve_system_statistics_t));
-    ESP_LOGI(TAG, "Statistics reset");
-    return ESP_OK;
-}
-
-bool valve_control_driver_is_initialized(void) {
-    return g_valve_driver.driver_initialized;
-}
-
-uint8_t valve_control_driver_get_active_valve_count(void) {
-    // Sistema simplificado: máximo 1 válvula activa
-    return valve_control_driver_has_any_valve_open() ? 1 : 0;
+    
+    return ESP_ERR_TIMEOUT;
 }
 
 // ============================================================================
-// FUNCIONES PÚBLICAS - UTILIDADES Y DEBUG
+// FUNCIONES PÚBLICAS - CALLBACKS Y EVENTOS
+// ============================================================================
+
+esp_err_t valve_control_driver_register_callback(valve_event_callback_t callback) {
+    if (!callback) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    g_driver_state.event_callback = callback;
+    ESP_LOGI(TAG, "Event callback registered");
+    return ESP_OK;
+}
+
+// ============================================================================
+// FUNCIONES PÚBLICAS - UTILIDADES
 // ============================================================================
 
 const char* valve_control_driver_state_to_string(valve_state_t state) {
     switch (state) {
-        case VALVE_STATE_CLOSED: return "CLOSED";
-        case VALVE_STATE_OPENING: return "OPENING";
-        case VALVE_STATE_OPEN: return "OPEN";
-        case VALVE_STATE_CLOSING: return "CLOSING";
-        case VALVE_STATE_ERROR: return "ERROR";
-        // VALVE_STATE_UNKNOWN no existe en el dominio
-        default: return "INVALID";
+        case VALVE_STATE_CLOSED: return "closed";
+        case VALVE_STATE_OPEN: return "open";
+        case VALVE_STATE_OPENING: return "opening";
+        case VALVE_STATE_CLOSING: return "closing";
+        case VALVE_STATE_ERROR: return "error";
+        case VALVE_STATE_MAINTENANCE: return "maintenance";
+        default: return "unknown";
     }
 }
 
-const char* valve_control_driver_error_to_string(valve_error_type_t error) {
-    switch (error) {
-        case VALVE_ERROR_NONE: return "NONE";
-        case VALVE_ERROR_TIMEOUT: return "TIMEOUT";
-        case VALVE_ERROR_SHORT_CIRCUIT: return "SHORT_CIRCUIT";
-        case VALVE_ERROR_OPEN_CIRCUIT: return "OPEN_CIRCUIT";
-        case VALVE_ERROR_OVERVOLTAGE: return "OVERVOLTAGE";
-        case VALVE_ERROR_OVERCURRENT: return "OVERCURRENT";
-        case VALVE_ERROR_MECHANICAL_JAM: return "MECHANICAL_JAM";
-        case VALVE_ERROR_RELAY_FAILURE: return "RELAY_FAILURE";
-        case VALVE_ERROR_GPIO_FAILURE: return "GPIO_FAILURE";
-        default: return "UNKNOWN";
+const char* valve_control_driver_error_to_string(valve_error_type_t error_type) {
+    switch (error_type) {
+        case VALVE_ERROR_NONE: return "none";
+        case VALVE_ERROR_TIMEOUT: return "timeout";
+        case VALVE_ERROR_SHORT_CIRCUIT: return "short_circuit";
+        case VALVE_ERROR_OPEN_CIRCUIT: return "open_circuit";
+        case VALVE_ERROR_OVERVOLTAGE: return "overvoltage";
+        case VALVE_ERROR_OVERCURRENT: return "overcurrent";
+        case VALVE_ERROR_MECHANICAL_JAM: return "mechanical_jam";
+        case VALVE_ERROR_RELAY_FAILURE: return "relay_failure";
+        case VALVE_ERROR_GPIO_FAILURE: return "gpio_failure";
+        default: return "unknown";
     }
-}
-
-void valve_control_driver_print_status(uint8_t valve_number) {
-    if (!g_valve_driver.driver_initialized) {
-        ESP_LOGW(TAG, "Driver not initialized");
-        return;
-    }
-
-    if (!is_valid_valve_number(valve_number)) {
-        ESP_LOGW(TAG, "Invalid valve number for status: %d", valve_number);
-        return;
-    }
-
-    valve_status_t* status = &g_valve_driver.valve_status;
-
-    ESP_LOGI(TAG, "=== VALVE %d STATUS ===", valve_number);
-    ESP_LOGI(TAG, "Current State: %s", valve_control_driver_state_to_string(status->state));
-    // Campos gpio_pin, target_state, last_error no existen en la estructura del dominio
-    // Campos is_relay_energized y total_open_time_ms no existen en la estructura del dominio
-    // Campos open_operations_count, close_operations_count, error_count, response_time_ms no existen en la estructura del dominio
-
-    if (status->state == VALVE_STATE_OPEN && status->start_timestamp > 0) {
-        uint32_t session_duration = valve_control_driver_get_valve_open_duration(valve_number);
-        ESP_LOGI(TAG, "Current Session: %.1f minutes", session_duration / 60000.0);
-    }
-
-    ESP_LOGI(TAG, "======================");
-}
-
-void valve_control_driver_print_system_statistics(void) {
-    if (!g_valve_driver.driver_initialized) {
-        ESP_LOGW(TAG, "Driver not initialized");
-        return;
-    }
-
-    valve_system_statistics_t* stats = &g_valve_driver.statistics;
-
-    ESP_LOGI(TAG, "=== SYSTEM STATISTICS ===");
-    ESP_LOGI(TAG, "Total Open Commands: %" PRIu32, stats->total_open_commands);
-    ESP_LOGI(TAG, "Total Close Commands: %" PRIu32, stats->total_close_commands);
-    ESP_LOGI(TAG, "Successful Operations: %" PRIu32, stats->successful_operations);
-    ESP_LOGI(TAG, "Failed Operations: %" PRIu32, stats->failed_operations);
-
-    if (stats->total_open_commands + stats->total_close_commands > 0) {
-        float success_rate = (float)stats->successful_operations /
-                           (stats->successful_operations + stats->failed_operations) * 100.0;
-        ESP_LOGI(TAG, "Success Rate: %.1f%%", success_rate);
-    }
-
-    ESP_LOGI(TAG, "Timeout Errors: %" PRIu32, stats->timeout_errors);
-    ESP_LOGI(TAG, "Hardware Errors: %" PRIu32, stats->hardware_errors);
-    ESP_LOGI(TAG, "Safety Stops: %" PRIu32, stats->safety_stops);
-    ESP_LOGI(TAG, "Average Response Time: %.1fms", stats->average_response_time_ms);
-    ESP_LOGI(TAG, "Total Irrigation Time: %.1f hours", stats->total_irrigation_time_ms / 3600000.0);
-    ESP_LOGI(TAG, "==========================");
 }
 
 uint32_t valve_control_driver_get_current_timestamp_ms(void) {
-    return esp_timer_get_time() / 1000; // Convertir microsegundos a milisegundos
+    return get_current_timestamp_ms();
 }
