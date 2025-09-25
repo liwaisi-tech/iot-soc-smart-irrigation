@@ -8,6 +8,7 @@
 #include "soil_sensor_data.h"
 #include "safety_limits.h"
 #include "irrigation_command.h"
+#include "system_mode.h"
 
 /**
  * @file irrigation_logic.h

@@ -9,6 +9,7 @@
 #include "irrigation_status.h"
 #include "irrigation_command.h"
 #include "safety_limits.h"
+#include "system_mode.h"
 
 /**
  * @file safety_manager.h

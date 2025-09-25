@@ -1,7 +1,10 @@
 idf_component_register(SRCS "services/device_config_service.c"
+                    "services/irrigation_logic.c"
+                    "services/safety_manager.c"
+                    "services/offline_mode_logic.c"
                     INCLUDE_DIRS "."
                     "entities"
-                    "value_objects" 
+                    "value_objects"
                     "repositories"
                     "services"
                     PRIV_REQUIRES nvs_flash)
