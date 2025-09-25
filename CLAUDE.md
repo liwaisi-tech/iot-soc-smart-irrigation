@@ -487,7 +487,7 @@ void test_soil_moisture_adc_reading(void) {
 
 ### Timing Requirements
 - **Sensor Reading**: 30-second intervals (configurable 10-300 seconds)
-- **Data Publishing**: 60-second intervals (configurable)
+- **Data Publishing**: 30-second intervals (configurable)
 - **HTTP Response**: < 500ms for all endpoints
 - **MQTT Response**: < 2 seconds for command processing
 - **Valve Activation**: < 2 seconds from command to physical response
@@ -592,8 +592,8 @@ curl http://192.168.1.100/ping
 - **Microcontroller**: ESP32 DevKit (38-pin recommended)
 - **Environmental Sensor**: DHT22 (temperature/humidity)
 - **Soil Sensors**: Capacitive soil moisture sensors (1-3 units)
-- **Irrigation Control**: 5V relay module (1-3 channels)
-- **Valves**: 12V/24V solenoid valves
+- **Irrigation Control**: 5V  2 relay module spdt (2 channels)
+- **Valve**: 4,7 v solenoid valve lanch type de 90º angulo
 - **Power Supply**: 12V/5A with battery backup and solar panel
 - **Enclosure**: IP65 waterproof enclosure for outdoor installation
 
