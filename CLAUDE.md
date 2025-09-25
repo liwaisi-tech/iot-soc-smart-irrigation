@@ -247,7 +247,7 @@ curl http://192.168.1.100/sensors # Check sensor data
 
 ### Timing Requirements
 - **Sensor Reading**: 30-second intervals (configurable 10-300 seconds)
-- **Data Publishing**: 60-second intervals (configurable)
+- **Data Publishing**: 30-second intervals (configurable)
 - **HTTP Response**: < 500ms for all endpoints
 - **MQTT Response**: < 2 seconds for command processing
 - **Valve Activation**: < 2 seconds from command to physical response
@@ -270,6 +270,104 @@ idf.py monitor            # Monitor output
 idf.py menuconfig         # Configure project
 ```
 
+### Field Diagnostic Endpoints
+```bash
+# Device health check
+curl http://192.168.1.100/whoami
+
+# Real-time sensor readings
+curl http://192.168.1.100/sensors
+
+# Network connectivity test
+curl http://192.168.1.100/ping
+```
+
+## Deployment Considerations
+
+### Hardware Requirements
+- **Microcontroller**: ESP32 DevKit (38-pin recommended)
+- **Environmental Sensor**: DHT22 (temperature/humidity)
+- **Soil Sensors**: Capacitive soil moisture sensors (1-3 units)
+- **Irrigation Control**: 5V  2 relay module spdt (2 channels)
+- **Valve**: 4,7 v solenoid valve lanch type de 90º angulo
+- **Power Supply**: 12V/5A with battery backup and solar panel
+- **Enclosure**: IP65 waterproof enclosure for outdoor installation
+
+### Network Requirements
+- **WiFi Access Point**: 2.4GHz, WPA2/WPA3 security
+- **Internet Connectivity**: Stable broadband for MQTT broker access
+- **MQTT Broker**: Supporting WebSockets (port 1883 or 8083)
+- **Bandwidth**: Minimal - ~1KB/minute data transmission
+
+### Field Installation
+```c
+// Pre-deployment checklist
+#define DEPLOYMENT_CHECKLIST \
+    "1. Configure WiFi credentials via menuconfig\n" \
+    "2. Set device name and crop type\n" \
+    "3. Calibrate soil moisture sensors (dry/wet)\n" \
+    "4. Test irrigation valve response\n" \
+    "5. Verify MQTT broker connectivity\n" \
+    "6. Configure irrigation thresholds\n" \
+    "7. Test offline mode functionality\n" \
+    "8. Install in weatherproof enclosure\n" \
+    "9. Connect power and backup systems\n" \
+    "10. Monitor operation for 24 hours"
+```
+
+### Remote Monitoring Setup
+- **MQTT Broker**: Cloud-hosted or local server
+- **Dashboard**: Real-time sensor monitoring
+- **Alerts**: Low battery, connectivity issues, sensor failures
+- **OTA Updates**: Remote firmware updates for field devices
+
+## Getting Started for Developers
+
+### Development Environment Setup
+```bash
+# 1. Install ESP-IDF v5.4.2
+git clone -b v5.4.2 --recursive https://github.com/espressif/esp-idf.git
+cd esp-idf && ./install.sh && . ./export.sh
+
+# 2. Clone project repository
+git clone https://github.com/liwaisi-tech/iot-soc-smart-irrigation.git
+cd iot-soc-smart-irrigation
+
+# 3. Configure project
+idf.py menuconfig
+
+# 4. Build and flash
+Get_idf
+idf.py build flash monitor
+```
+
+### AI Assistant Integration
+For AI-assisted development, use the specialized agent prompt:
+```
+# Use this agent prompt for development assistance:
+File: esp32_smart_irrigation_agent_prompt.md
+
+# This agent understands:
+- Hexagonal architecture patterns for ESP32
+- Domain-driven design for IoT systems
+- Project-specific sensor integration
+- Rural deployment considerations
+- Clean code practices for embedded C
+```
+
+### Development Workflow
+1. **Understand Architecture**: Study hexagonal layer separation
+2. **Follow Phases**: Implement according to development phases
+3. **Domain-First**: Start with business logic, then application, then infrastructure
+4. **Test Incrementally**: Unit tests → integration tests → hardware validation
+5. **Document Changes**: Update this guide when adding features
+
+### Code Quality Standards
+- **Functions**: Max 20 lines, single responsibility
+- **Variables**: Descriptive names with project context
+- **Comments**: Explain business rules and safety considerations
+- **Error Handling**: Always check return values, log appropriately
+- **Memory Management**: Zero leaks, proper resource cleanup
 ---
 
 ## Project Status Summary
