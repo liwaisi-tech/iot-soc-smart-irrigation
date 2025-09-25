@@ -260,23 +260,29 @@ Infrastructure Layer → Application Layer → Domain Layer
 
 ## Hardware Configuration
 
-### GPIO Pin Assignments (Standardized)
+### GPIO Pin Assignments (Ultra-Safe Configuration)
 ```c
-// Irrigation valve control (relay outputs)
-#define IRRIGATION_VALVE_1_GPIO     GPIO_NUM_2
-#define IRRIGATION_VALVE_2_GPIO     GPIO_NUM_4
-#define IRRIGATION_VALVE_3_GPIO     GPIO_NUM_5
+// Irrigation valve control (relay outputs) - ULTRA SAFE PINS
+#define IRRIGATION_VALVE_1_GPIO     GPIO_NUM_21   // ULTRA SEGURO - No bootstrap
+#define IRRIGATION_VALVE_2_GPIO     GPIO_NUM_22   // ULTRA SEGURO - No bootstrap
+#define IRRIGATION_VALVE_3_GPIO     GPIO_NUM_23   // ULTRA SEGURO - No bootstrap
 
-// Environmental sensor (DHT22)
-#define DHT22_DATA_GPIO            GPIO_NUM_18
+// Environmental sensor (DHT22) - SAFE PIN
+#define DHT22_DATA_GPIO            GPIO_NUM_4     // SEGURO - No bootstrap
 
-// Soil moisture sensors (analog ADC)
-#define SOIL_MOISTURE_1_ADC        ADC1_CHANNEL_0  // GPIO 36
-#define SOIL_MOISTURE_2_ADC        ADC1_CHANNEL_3  // GPIO 39
-#define SOIL_MOISTURE_3_ADC        ADC1_CHANNEL_6  // GPIO 34
+// Soil moisture sensors (analog ADC) - ADC1 WiFi Compatible
+#define SOIL_MOISTURE_1_ADC        ADC1_CHANNEL_0  // GPIO 36 ✅ ADC1 + WiFi compatible
+#define SOIL_MOISTURE_2_ADC        ADC1_CHANNEL_3  // GPIO 39 ✅ ADC1 + WiFi compatible
+#define SOIL_MOISTURE_3_ADC        ADC1_CHANNEL_6  // GPIO 34 ✅ ADC1 + WiFi compatible
 
-// Status LED
-#define STATUS_LED_GPIO            GPIO_NUM_2
+// Status LEDs - ULTRA SAFE PINS
+#define LED_STATUS_GPIO_PIN        GPIO_NUM_25   // LED Estado - ULTRA SEGURO
+#define LED_RED_GPIO_PIN           GPIO_NUM_27   // LED Rojo - ULTRA SEGURO
+#define LED_GREEN_GPIO_PIN         GPIO_NUM_26   // LED Verde - ULTRA SEGURO
+#define LED_BLUE_GPIO_PIN          GPIO_NUM_16   // LED Azul - SEGURO
+
+// BOOTSTRAP PINS AVOIDED: GPIO0, GPIO2, GPIO5, GPIO12, GPIO15
+// Reference: https://lastminuteengineers.com/esp32-pinout-reference/
 ```
 
 ### Power Requirements
@@ -954,3 +960,6 @@ ESP_LOGI(TAG, "Valve start time: %" PRIu32, valve_start_time);
 - **Build Project**: `idf.py build`
 - **AI Agent**: Use `esp32-irrigation-architect` for specialized assistance
 - **Priority Order**: Compilation fixes → MQTT integration → Hardware testing
+- aca link para informacion sobre referencias de pin out de esp 32 https://lastminuteengineers.com/esp32-pinout-reference/
+
+- para hacer actualizaciones de codigo: Siempre realizar los ajustes del nuevo codigo y luego validar que la logica se mantenga, borrar el codigo anterior que no se va a usar y  compilar para asegurar que no ha y errores de ejecucion. de haber estos errores solucionarlos antes de dar por termianda

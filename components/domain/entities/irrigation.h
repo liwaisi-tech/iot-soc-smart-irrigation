@@ -7,6 +7,8 @@
 #include "irrigation_status.h"
 #include "irrigation_command.h"
 #include "safety_limits.h"
+#include "ambient_sensor_data.h"
+#include "soil_sensor_data.h"
 
 /**
  * @file irrigation.h

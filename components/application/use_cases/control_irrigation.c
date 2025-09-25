@@ -29,6 +29,7 @@
 #include "esp_timer.h"
 #include <string.h>
 #include <math.h>
+#include <inttypes.h>  // Para PRIu32
 
 static const char* TAG = "control_irrigation";
 
@@ -58,28 +59,7 @@ static const char* TAG = "control_irrigation";
 // TIPOS DE DECISIÓN DE RIEGO (SEGÚN PLAN)
 // ============================================================================
 
-/**
- * @brief Tipos de decisión de riego según especificaciones del plan
- */
-typedef enum {
-    IRRIGATION_DECISION_NONE = 0,           // No action needed
-    IRRIGATION_DECISION_START_NORMAL,       // Start normal irrigation
-    IRRIGATION_DECISION_START_EMERGENCY,    // Start emergency irrigation
-    IRRIGATION_DECISION_STOP_TARGET,        // Stop - target reached
-    IRRIGATION_DECISION_EMERGENCY_STOP      // Emergency stop - over-irrigation
-} irrigation_decision_type_t;
-
-/**
- * @brief Estructura de decisión de riego según plan
- */
-typedef struct {
-    irrigation_decision_type_t decision;
-    uint8_t recommended_valve;       // Which valve to activate (1 para sistema simplificado)
-    uint16_t recommended_duration;   // Minutes
-    char justification[128];         // Why this decision
-    float average_soil_humidity;     // Promedio usado para decisión
-    bool safety_override_required;   // Si requiere override de seguridad
-} irrigation_decision_t;
+// Tipos de decisión de riego están definidos en el dominio (irrigation_logic.h)
 
 // ============================================================================
 // ESTADO GLOBAL DEL USE CASE
@@ -117,8 +97,8 @@ static irrigation_decision_t evaluate_soil_conditions_plan_logic(const soil_sens
 
         decision.decision = IRRIGATION_DECISION_EMERGENCY_STOP;
         decision.recommended_valve = 1;
-        decision.recommended_duration = 0;
-        snprintf(decision.justification, sizeof(decision.justification),
+        decision.recommended_duration_minutes = 0;
+        snprintf(decision.explanation, sizeof(decision.explanation),
                  "EMERGENCY: Soil humidity > 80%% detected (%.1f%%, %.1f%%, %.1f%%)",
                  soil_data->soil_humidity_1, soil_data->soil_humidity_2, soil_data->soil_humidity_3);
 
@@ -133,8 +113,8 @@ static irrigation_decision_t evaluate_soil_conditions_plan_logic(const soil_sens
 
         decision.decision = IRRIGATION_DECISION_STOP_TARGET;
         decision.recommended_valve = 1;
-        decision.recommended_duration = 0;
-        snprintf(decision.justification, sizeof(decision.justification),
+        decision.recommended_duration_minutes = 0;
+        snprintf(decision.explanation, sizeof(decision.explanation),
                  "Target reached: All sensors >= 75%% (%.1f%%, %.1f%%, %.1f%%)",
                  soil_data->soil_humidity_1, soil_data->soil_humidity_2, soil_data->soil_humidity_3);
 
@@ -149,8 +129,8 @@ static irrigation_decision_t evaluate_soil_conditions_plan_logic(const soil_sens
 
         decision.decision = IRRIGATION_DECISION_START_EMERGENCY;
         decision.recommended_valve = 1;
-        decision.recommended_duration = EMERGENCY_IRRIGATION_DURATION_MINUTES;
-        snprintf(decision.justification, sizeof(decision.justification),
+        decision.recommended_duration_minutes = EMERGENCY_IRRIGATION_DURATION_MINUTES;
+        snprintf(decision.explanation, sizeof(decision.explanation),
                  "EMERGENCY: Critical low humidity < 30%% detected (%.1f%%, %.1f%%, %.1f%%)",
                  soil_data->soil_humidity_1, soil_data->soil_humidity_2, soil_data->soil_humidity_3);
 
@@ -163,13 +143,13 @@ static irrigation_decision_t evaluate_soil_conditions_plan_logic(const soil_sens
                              soil_data->soil_humidity_2 +
                              soil_data->soil_humidity_3) / 3.0;
 
-    decision.average_soil_humidity = average_humidity;
+    // Campo average_soil_humidity no existe en la estructura del dominio
 
     if (average_humidity < SOIL_WARNING_LOW_PERCENT) {
-        decision.decision = IRRIGATION_DECISION_START_NORMAL;
+        decision.decision = IRRIGATION_DECISION_START_THERMAL;
         decision.recommended_valve = 1;
-        decision.recommended_duration = DEFAULT_IRRIGATION_DURATION_MINUTES;
-        snprintf(decision.justification, sizeof(decision.justification),
+        decision.recommended_duration_minutes = DEFAULT_IRRIGATION_DURATION_MINUTES;
+        snprintf(decision.explanation, sizeof(decision.explanation),
                  "Normal irrigation: Average humidity %.1f%% < 45%% threshold",
                  average_humidity);
 
@@ -178,10 +158,10 @@ static irrigation_decision_t evaluate_soil_conditions_plan_logic(const soil_sens
     }
 
     // SIN ACCIÓN NECESARIA
-    decision.decision = IRRIGATION_DECISION_NONE;
+    decision.decision = IRRIGATION_DECISION_WAIT_COOLDOWN;
     decision.recommended_valve = 0;
-    decision.recommended_duration = 0;
-    snprintf(decision.justification, sizeof(decision.justification),
+    decision.recommended_duration_minutes = 0;
+    snprintf(decision.explanation, sizeof(decision.explanation),
              "No action needed: Average humidity %.1f%% within normal range",
              average_humidity);
 
@@ -196,13 +176,18 @@ static void init_irrigation_status(irrigation_status_t* status) {
     memset(status, 0, sizeof(irrigation_status_t));
 
     // Solo válvula 1 en sistema simplificado
-    status->is_valve_1_active = false;
-    status->is_valve_2_active = false;
-    status->is_valve_3_active = false;
-
-    status->max_duration_minutes = MAX_IRRIGATION_DURATION_MINUTES;
+    // Initialize valve statuses using domain structure
+    status->valve_1.state = VALVE_STATE_CLOSED;
+    status->valve_2.state = VALVE_STATE_CLOSED;
+    status->valve_3.state = VALVE_STATE_CLOSED;
+    status->valve_1.start_timestamp = 0;
+    status->valve_2.start_timestamp = 0;
+    status->valve_3.start_timestamp = 0;
+    status->valve_1.max_duration_minutes = MAX_IRRIGATION_DURATION_MINUTES;
+    status->valve_2.max_duration_minutes = MAX_IRRIGATION_DURATION_MINUTES;
+    status->valve_3.max_duration_minutes = MAX_IRRIGATION_DURATION_MINUTES;
     status->emergency_stop_active = false;
-    strcpy(status->last_stop_reason, "system_init");
+    strcpy(status->valve_1.last_stop_reason, "system_init");
 
     ESP_LOGI(TAG, "Irrigation status initialized for simplified system (1 valve)");
 }
@@ -212,7 +197,11 @@ static void init_irrigation_status(irrigation_status_t* status) {
  */
 static bool is_any_valve_active(const irrigation_status_t* status) {
     // Sistema simplificado: solo válvula 1
-    return status->is_valve_1_active;
+    if (!status) {
+        return false;
+    }
+    return (status->valve_1.state == VALVE_STATE_OPEN || 
+            status->valve_1.state == VALVE_STATE_OPENING);
 }
 
 /**
@@ -221,13 +210,13 @@ static bool is_any_valve_active(const irrigation_status_t* status) {
 static bool is_valve_timeout(const irrigation_status_t* status, uint8_t valve_number) {
     if (valve_number != 1) return false;  // Solo válvula 1 en sistema simplificado
 
-    if (!status->is_valve_1_active || status->valve_1_start_time == 0) {
+    if (status->valve_1.state != VALVE_STATE_OPEN || status->valve_1.start_timestamp == 0) {
         return false;
     }
 
     uint32_t current_time = esp_timer_get_time() / 1000000; // segundos
-    uint32_t elapsed_time = current_time - status->valve_1_start_time;
-    uint32_t max_time_seconds = status->max_duration_minutes * 60;
+    uint32_t elapsed_time = current_time - status->valve_1.start_timestamp;
+    uint32_t max_time_seconds = status->valve_1.max_duration_minutes * 60;
 
     return elapsed_time > max_time_seconds;
 }
@@ -239,13 +228,14 @@ static void update_valve_status(irrigation_status_t* status, uint8_t valve_numbe
     uint32_t current_time = esp_timer_get_time() / 1000000; // segundos
 
     if (valve_number == 1) {
-        status->is_valve_1_active = is_active;
         if (is_active) {
-            status->valve_1_start_time = current_time;
+            status->valve_1.state = VALVE_STATE_OPEN;
+            status->valve_1.start_timestamp = current_time;
         } else {
-            status->valve_1_start_time = 0;
+            status->valve_1.state = VALVE_STATE_CLOSED;
+            status->valve_1.start_timestamp = 0;
             if (reason) {
-                strncpy(status->last_stop_reason, reason, sizeof(status->last_stop_reason) - 1);
+                strncpy(status->valve_1.last_stop_reason, reason, sizeof(status->valve_1.last_stop_reason) - 1);
             }
         }
     }
@@ -371,7 +361,7 @@ control_irrigation_operation_result_t control_irrigation_execute_automatic_evalu
 
     // Paso 3: Validar seguridad usando safety_manager
     safety_evaluation_context_t safety_context = {
-        .current_session_start_time = g_control_irrigation_state.current_irrigation_status.valve_1_start_time,
+        .current_session_start_time = g_control_irrigation_state.current_irrigation_status.valve_1.start_timestamp,
         .last_irrigation_end_time = 0,  // Simplificado
         .active_valve_count = is_any_valve_active(&g_control_irrigation_state.current_irrigation_status) ? 1 : 0,
         .emergency_stop_count_today = g_control_irrigation_state.emergency_stops_executed,
@@ -412,7 +402,7 @@ control_irrigation_operation_result_t control_irrigation_execute_automatic_evalu
     bool state_changed = false;
 
     switch (decision.decision) {
-        case IRRIGATION_DECISION_START_NORMAL:
+        case IRRIGATION_DECISION_START_THERMAL:
         case IRRIGATION_DECISION_START_EMERGENCY:
             if (!is_any_valve_active(&g_control_irrigation_state.current_irrigation_status)) {
                 action_result = valve_control_driver_open_valve(decision.recommended_valve);
@@ -452,7 +442,7 @@ control_irrigation_operation_result_t control_irrigation_execute_automatic_evalu
             strcpy(result.action_taken, "Emergency stop executed");
             break;
 
-        case IRRIGATION_DECISION_NONE:
+        case IRRIGATION_DECISION_WAIT_COOLDOWN:
         default:
             strcpy(result.action_taken, "No action required");
             break;
@@ -479,14 +469,14 @@ control_irrigation_operation_result_t control_irrigation_execute_automatic_evalu
 
     // Preparar resultado
     result.result_code = CONTROL_IRRIGATION_SUCCESS;
-    strncpy(result.description, decision.justification, sizeof(result.description) - 1);
+    strncpy(result.description, decision.explanation, sizeof(result.description) - 1);
     result.state_changed = state_changed;
 
     uint32_t end_time = esp_timer_get_time() / 1000; // ms
     result.execution_time_ms = end_time - start_time;
 
-    ESP_LOGI(TAG, "Automatic evaluation completed: %s (%.1f%% avg humidity, %dms)",
-             result.action_taken, decision.average_soil_humidity, result.execution_time_ms);
+    ESP_LOGI(TAG, "Automatic evaluation completed: %s (%.1f%% avg humidity, %" PRIu32 "ms)",
+              result.action_taken, 0.0f, result.execution_time_ms);
 
     return result;
 }
@@ -503,8 +493,7 @@ control_irrigation_operation_result_t control_irrigation_process_command(
         return result;
     }
 
-    ESP_LOGI(TAG, "Processing irrigation command: %s for valve %d",
-             command->command_type, command->valve_number);
+    ESP_LOGI(TAG, "Processing irrigation command for valve %d", command->valve_number);
 
     // Validar comando
     if (!irrigation_command_is_valid(command)) {
@@ -525,7 +514,7 @@ control_irrigation_operation_result_t control_irrigation_process_command(
     bool state_changed = false;
 
     // Procesar comando específico
-    if (strcmp(command->command_type, "start_irrigation") == 0) {
+    if (command->action == IRRIGATION_ACTION_START) {
         action_result = valve_control_driver_open_valve(command->valve_number);
         if (action_result == ESP_OK) {
             update_valve_status(&g_control_irrigation_state.current_irrigation_status,
@@ -533,7 +522,7 @@ control_irrigation_operation_result_t control_irrigation_process_command(
             state_changed = true;
             strcpy(result.action_taken, "Irrigation started via MQTT");
         }
-    } else if (strcmp(command->command_type, "stop_irrigation") == 0) {
+    } else if (command->action == IRRIGATION_ACTION_STOP) {
         action_result = valve_control_driver_close_valve(command->valve_number);
         if (action_result == ESP_OK) {
             update_valve_status(&g_control_irrigation_state.current_irrigation_status,
@@ -541,14 +530,14 @@ control_irrigation_operation_result_t control_irrigation_process_command(
             state_changed = true;
             strcpy(result.action_taken, "Irrigation stopped via MQTT");
         }
-    } else if (strcmp(command->command_type, "emergency_stop") == 0) {
+    } else if (command->action == IRRIGATION_ACTION_EMERGENCY_STOP) {
         control_irrigation_execute_emergency_stop(context, "mqtt_emergency_command");
         state_changed = true;
         strcpy(result.action_taken, "Emergency stop executed via MQTT");
     } else {
         result.result_code = CONTROL_IRRIGATION_COMMAND_INVALID;
         snprintf(result.description, sizeof(result.description),
-                 "Unknown command type: %s", command->command_type);
+                 "Unknown command type: %s", "UNKNOWN");
         return result;
     }
 
@@ -585,12 +574,12 @@ control_irrigation_operation_result_t control_irrigation_execute_emergency_stop(
 
     // Actualizar estado de emergencia
     g_control_irrigation_state.current_irrigation_status.emergency_stop_active = true;
-    g_control_irrigation_state.current_irrigation_status.is_valve_1_active = false;
-    g_control_irrigation_state.current_irrigation_status.valve_1_start_time = 0;
+    g_control_irrigation_state.current_irrigation_status.valve_1.state = VALVE_STATE_CLOSED;
+    g_control_irrigation_state.current_irrigation_status.valve_1.start_timestamp = 0;
 
     if (reason) {
-        strncpy(g_control_irrigation_state.current_irrigation_status.last_stop_reason,
-                reason, sizeof(g_control_irrigation_state.current_irrigation_status.last_stop_reason) - 1);
+        strncpy(g_control_irrigation_state.current_irrigation_status.valve_1.last_stop_reason,
+                reason, sizeof(g_control_irrigation_state.current_irrigation_status.valve_1.last_stop_reason) - 1);
     }
 
     // Incrementar contador de emergencias
@@ -610,7 +599,7 @@ control_irrigation_operation_result_t control_irrigation_execute_emergency_stop(
     }
 
     // Log crítico para auditoría
-    ESP_LOGW(TAG, "EMERGENCY STOP EXECUTED: %s (total: %d today)",
+    ESP_LOGW(TAG, "EMERGENCY STOP EXECUTED: %s (total: %" PRIu32 " today)",
              reason ? reason : "unknown", g_control_irrigation_state.emergency_stops_executed);
 
     return result;
@@ -730,7 +719,7 @@ esp_err_t control_irrigation_read_all_sensors(control_irrigation_context_t* cont
     if (ambient_data->ambient_temperature == 0.0 && ambient_data->ambient_humidity == 0.0) {
         ambient_data->ambient_temperature = 25.0;  // Temperatura por defecto
         ambient_data->ambient_humidity = 60.0;     // Humedad por defecto
-        ambient_data->timestamp = esp_timer_get_time() / 1000000;
+        // ambient_data->timestamp no longer exists in the domain structure
         ESP_LOGD(TAG, "Using default ambient values");
     }
 
@@ -751,8 +740,8 @@ esp_err_t control_irrigation_publish_system_status(control_irrigation_context_t*
     }
 
     // En implementación simplificada, solo log el estado
-    ESP_LOGI(TAG, "System status: Valve 1 %s, Emergency: %s, Evaluations: %d",
-             g_control_irrigation_state.current_irrigation_status.is_valve_1_active ? "ACTIVE" : "INACTIVE",
+    ESP_LOGI(TAG, "System status: Valve 1 %s, Emergency: %s, Evaluations: %" PRIu32,
+             (g_control_irrigation_state.current_irrigation_status.valve_1.state == VALVE_STATE_OPEN) ? "ACTIVE" : "INACTIVE",
              g_control_irrigation_state.current_irrigation_status.emergency_stop_active ? "YES" : "NO",
              context->state.evaluation_count);
 
@@ -791,7 +780,7 @@ esp_err_t control_irrigation_set_evaluation_interval(control_irrigation_context_
     }
 
     context->configuration.evaluation_interval_ms = interval_ms;
-    ESP_LOGI(TAG, "Evaluation interval set to %dms", interval_ms);
+    ESP_LOGI(TAG, "Evaluation interval set to %" PRIu16 "ms", interval_ms);
     return ESP_OK;
 }
 
@@ -880,10 +869,20 @@ esp_err_t control_irrigation_init_global(void) {
 
     // Inicializar contexto por defecto
     safety_limits_t default_safety_limits = {
-        .max_soil_humidity_percent = SOIL_EMERGENCY_HIGH_PERCENT,
-        .max_irrigation_duration_minutes = MAX_IRRIGATION_DURATION_MINUTES,
-        .min_soil_humidity_percent = SOIL_CRITICAL_LOW_PERCENT,
-        .max_ambient_temperature_celsius = 50.0
+        .soil_humidity = {
+            .critical_low_percent = SOIL_CRITICAL_LOW_PERCENT,
+            .warning_low_percent = 45.0,
+            .target_min_percent = 70.0,
+            .target_max_percent = 75.0,
+            .emergency_high_percent = SOIL_EMERGENCY_HIGH_PERCENT
+        },
+        .temperature = {
+            .night_irrigation_max = 32.0,
+            .thermal_stress_min = 32.0,
+            .emergency_stop_max = 40.0,
+            .optimal_range_min = 26.0,
+            .optimal_range_max = 30.0
+        }
     };
 
     esp_err_t ret = control_irrigation_init_context(&g_control_irrigation_state.context,

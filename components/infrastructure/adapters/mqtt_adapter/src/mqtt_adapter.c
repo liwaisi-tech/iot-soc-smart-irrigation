@@ -4,6 +4,7 @@
 #include "device_config_service.h"
 #include "wifi_adapter.h"
 #include "shared_resource_manager.h"
+// #include "process_mqtt_commands.h"  // Temporarily disabled
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_event.h"
@@ -41,6 +42,7 @@ static esp_err_t mqtt_adapter_start_reconnect_timer(uint32_t delay_ms);
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     esp_mqtt_event_handle_t event = event_data;
+    char command_topic[64];  // Declare once at function scope
     
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
@@ -56,6 +58,17 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             // Publish device registration
             if (mqtt_adapter_publish_device_registration() != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to publish device registration");
+            }
+
+            // Subscribe to command topic for remote irrigation control
+            char command_topic[64];
+            snprintf(command_topic, sizeof(command_topic), "irrigation/control/%s", s_mqtt_connection.device_mac);
+
+            int msg_id = esp_mqtt_client_subscribe(s_mqtt_connection.mqtt_client_handle, command_topic, 1);
+            if (msg_id >= 0) {
+                ESP_LOGI(TAG, "Successfully subscribed to command topic: %s", command_topic);
+            } else {
+                ESP_LOGE(TAG, "Failed to subscribe to command topic: %s", command_topic);
             }
             break;
             
@@ -99,7 +112,19 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             
         case MQTT_EVENT_DATA:
             ESP_LOGD(TAG, "MQTT message received on topic: %.*s", event->topic_len, event->topic);
-            // For future implementation of command subscriptions
+
+            // Check if this is a command message on our control topic
+            // Reuse command_topic from earlier scope
+            snprintf(command_topic, sizeof(command_topic), "irrigation/control/%s", s_mqtt_connection.device_mac);
+
+            if (event->topic_len > 0 && strncmp(event->topic, command_topic, event->topic_len) == 0) {
+                ESP_LOGI(TAG, "Received irrigation command (%d bytes) - processing temporarily disabled", (int)event->data_len);
+                
+                // TODO: Re-enable MQTT command processing once process_mqtt_commands is fixed
+                ESP_LOGD(TAG, "Command data: %.*s", (int)event->data_len, (char*)event->data);
+            } else {
+                ESP_LOGD(TAG, "Received message on unhandled topic: %.*s", event->topic_len, event->topic);
+            }
             break;
             
         default:
@@ -191,6 +216,9 @@ static esp_err_t mqtt_adapter_configure_client(void)
         return ESP_FAIL;
     }
     
+    // Update client handle for compatibility
+    s_mqtt_connection.client = s_mqtt_connection.mqtt_client_handle;
+    
     esp_err_t ret = esp_mqtt_client_register_event(s_mqtt_connection.mqtt_client_handle, 
                                                    ESP_EVENT_ANY_ID, 
                                                    mqtt_event_handler, 
@@ -281,6 +309,20 @@ esp_err_t mqtt_adapter_init(void)
                                    &mqtt_adapter_wifi_event_handler, NULL) != ESP_OK) {
         return ESP_FAIL;
     }
+
+    // Initialize device MAC address
+    uint8_t mac[6];
+    esp_err_t ret = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (ret == ESP_OK) {
+        snprintf(s_mqtt_connection.device_mac, sizeof(s_mqtt_connection.device_mac),
+                 "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    } else {
+        ESP_LOGE(TAG, "Failed to read MAC address: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Initialize client handle for compatibility
+    s_mqtt_connection.client = s_mqtt_connection.mqtt_client_handle;
 
     s_mqtt_connection.state = MQTT_CONNECTION_STATE_INITIALIZED;
     s_adapter_initialized = true;

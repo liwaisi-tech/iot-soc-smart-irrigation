@@ -160,17 +160,32 @@ static offline_mode_t determine_offline_mode_from_criticality(float criticality_
     soil_sensor_data_t dummy_soil = {
         .soil_humidity_1 = (1.0 - criticality_level) * 100.0,
         .soil_humidity_2 = (1.0 - criticality_level) * 100.0,
-        .soil_humidity_3 = (1.0 - criticality_level) * 100.0,
-        .timestamp = esp_timer_get_time() / 1000000
+        .soil_humidity_3 = (1.0 - criticality_level) * 100.0
     };
 
     ambient_sensor_data_t dummy_ambient = {
         .ambient_temperature = 25.0 + (criticality_level * 15.0),
-        .ambient_humidity = 60.0 - (criticality_level * 20.0),
-        .timestamp = esp_timer_get_time() / 1000000
+        .ambient_humidity = 60.0 - (criticality_level * 20.0)
     };
 
-    return offline_mode_logic_determine_mode(&dummy_ambient, &dummy_soil);
+    // Create evaluation context for criticality assessment
+    offline_evaluation_context_t evaluation_context = {
+        .time_offline_seconds = criticality_level * 3600,  // Simulate extended offline time
+        .last_irrigation_timestamp = 0,  // Not relevant for criticality-only assessment
+        .connectivity_loss_timestamp = 0,  // Not relevant for criticality-only assessment
+        .trigger = OFFLINE_ACTIVATION_NETWORK_UNRELIABLE,  // Default trigger
+        .current_power_mode = POWER_MODE_NORMAL,  // Assume normal power
+        .battery_level_percent = 80,  // Assume reasonable battery level
+        .solar_charging_active = false  // Assume no solar charging
+    };
+
+    offline_evaluation_result_t result = offline_mode_logic_evaluate_mode(
+        &dummy_ambient,
+        &dummy_soil,
+        OFFLINE_MODE_NORMAL,  // Default mode for evaluation
+        &evaluation_context
+    );
+    return result.recommended_mode;
 }
 
 /**
@@ -406,7 +421,7 @@ esp_err_t offline_irrigation_activate(offline_activation_reason_t reason,
     g_offline_state.statistics.total_offline_activations++;
     g_offline_state.offline_mode_active = true;
 
-    ESP_LOGI(TAG, "Offline mode activated: next evaluation in %" PRIu32 "s",
+    ESP_LOGI(TAG, "Offline mode activated: next evaluation in %us",
              g_offline_state.current_context.evaluation_interval_s);
 
     return ESP_OK;

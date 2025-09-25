@@ -24,6 +24,7 @@
 // #include "use_cases/control_irrigation.h"
 #include "mqtt_adapter.h"
 #include "publish_sensor_data.h"
+#include "process_mqtt_commands.h"
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
 static bool s_http_adapter_initialized = false;
@@ -171,14 +172,14 @@ void app_main(void)
     ESP_LOGI(TAG, "Inicializando sistema de recursos compartidos...");
     ESP_ERROR_CHECK(shared_resource_manager_init());
     
-    // Inicializar sensor DHT22 en GPIO_NUM_18 (documentación estándar del proyecto)
-    ESP_LOGI(TAG, "Inicializando sensor DHT22 en GPIO 18...");
-    ret = dht_sensor_init(GPIO_NUM_18);
+    // Inicializar sensor DHT22 en GPIO_NUM_4 (pin seguro, no bootstrap)
+    ESP_LOGI(TAG, "Inicializando sensor DHT22 en GPIO 4...");
+    ret = dht_sensor_init(GPIO_NUM_4);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Error al inicializar sensor DHT22: %s", esp_err_to_name(ret));
         ESP_LOGE(TAG, "El sistema continuará sin sensor de temperatura/humedad");
     } else {
-        ESP_LOGI(TAG, "Sensor DHT22 inicializado correctamente en GPIO 18");
+        ESP_LOGI(TAG, "Sensor DHT22 inicializado correctamente en GPIO 4");
     }
     
     // Inicializar servicio de configuración del dispositivo
@@ -217,9 +218,14 @@ void app_main(void)
     ESP_LOGI(TAG, "Inicializando adaptador MQTT...");
     ESP_ERROR_CHECK(mqtt_adapter_init());
 
+    // Inicializar procesador de comandos MQTT
+    ESP_LOGI(TAG, "Inicializando procesador de comandos MQTT...");
+    // TODO: Re-enable once process_mqtt_commands is fixed
+    // ESP_ERROR_CHECK(process_mqtt_commands_init("AA:BB:CC:DD:EE:FF", &default_safety_limits)); // Temporarily disabled
+
     // 3. Inicialización de la capa de aplicación (Use Cases)
     ESP_LOGI(TAG, "Inicializando capa de Aplicación...");
-    
+
     // TODO: Implementar inicialización de use cases
     // device_registration_init();
     // read_sensors_init();

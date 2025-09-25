@@ -81,6 +81,8 @@ typedef struct {
     mqtt_connection_stats_t stats;    // Runtime statistics
     bool device_registered;           // Whether device registration was sent
     void* mqtt_client_handle;         // ESP-IDF MQTT client handle (opaque)
+    char device_mac[18];              // Device MAC address (XX:XX:XX:XX:XX:XX format)
+    void* client;                     // MQTT client handle for compatibility
 } mqtt_connection_t;
 
 #endif // DOMAIN_ENTITIES_MQTT_CONNECTION_H

@@ -76,7 +76,7 @@ typedef struct {
 } soil_sensor_config_t;
 
 /**
- * @brief Estado en tiempo real de sensor
+ * @brief Estado en tiempo real del driver de sensor (infraestructura)
  */
 typedef struct {
     uint8_t sensor_number;                    // Número sensor
@@ -100,7 +100,7 @@ typedef struct {
     uint32_t last_reading_timestamp;          // Última lectura exitosa
     uint32_t consecutive_failures;            // Fallos consecutivos
     bool requires_calibration;                // Si requiere calibración
-} soil_sensor_state_t;
+} soil_moisture_driver_state_t;
 
 /**
  * @brief Configuración global del driver
@@ -189,7 +189,7 @@ esp_err_t soil_moisture_driver_read_all_sensors(
 esp_err_t soil_moisture_driver_read_sensor(
     uint8_t sensor_number,
     float ambient_temperature,
-    soil_sensor_state_t* sensor_state
+    soil_moisture_driver_state_t* sensor_state
 );
 
 /**
@@ -273,7 +273,7 @@ esp_err_t soil_moisture_driver_reset_calibration(uint8_t sensor_number);
  */
 esp_err_t soil_moisture_driver_get_sensor_state(
     uint8_t sensor_number,
-    soil_sensor_state_t* state
+    soil_moisture_driver_state_t* state
 );
 
 /**
@@ -319,12 +319,12 @@ esp_err_t soil_moisture_driver_set_config(const soil_moisture_driver_config_t* c
  *
  * @param stats Puntero donde escribir estadísticas
  */
-void soil_moisture_driver_get_statistics(soil_moisture_statistics_t* stats);
+esp_err_t soil_moisture_driver_get_statistics(soil_moisture_statistics_t* stats);
 
 /**
  * @brief Resetear estadísticas del driver
  */
-void soil_moisture_driver_reset_statistics(void);
+esp_err_t soil_moisture_driver_reset_statistics(void);
 
 /**
  * @brief Callback para eventos de sensor
@@ -336,7 +336,7 @@ void soil_moisture_driver_reset_statistics(void);
 typedef void (*soil_sensor_event_callback_t)(
     uint8_t sensor_number,
     const char* event_type,
-    const soil_sensor_state_t* sensor_state
+    const soil_moisture_driver_state_t* sensor_state
 );
 
 /**

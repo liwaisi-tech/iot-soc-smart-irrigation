@@ -14,10 +14,13 @@
  */
 
 #include "read_soil_sensors.h"
-#include "soil_moisture_driver.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <string.h>
+#include <inttypes.h>
+
+// Include infrastructure driver
+#include "soil_moisture_driver.h"
 #include <math.h>
 
 static const char* TAG = "read_soil_sensors";
@@ -145,7 +148,7 @@ static void convert_driver_state_to_application_state(uint8_t sensor_number,
                                                      float temperature_celsius,
                                                      soil_sensor_state_t* app_state) {
     // Obtener estado del driver de infraestructura
-    soil_moisture_sensor_state_t driver_state;
+    soil_moisture_driver_state_t driver_state;
     esp_err_t ret = soil_moisture_driver_get_sensor_state(sensor_number, &driver_state);
 
     // Inicializar estado de aplicación
@@ -160,9 +163,9 @@ static void convert_driver_state_to_application_state(uint8_t sensor_number,
     if (ret == ESP_OK) {
         app_state->is_connected = true;
         app_state->is_calibrated = true;  // Asumimos calibrado si el driver funciona
-        app_state->raw_adc_value = driver_state.last_adc_value;
-        app_state->raw_voltage = driver_state.last_voltage_mv / 1000.0;  // mV to V
-        app_state->consecutive_failures = driver_state.consecutive_errors;
+        app_state->raw_adc_value = driver_state.raw_adc_value;
+        app_state->raw_voltage = driver_state.raw_voltage;
+        app_state->consecutive_failures = (uint16_t)driver_state.consecutive_failures;
         app_state->reading_status = SOIL_READING_SUCCESS;
     } else {
         app_state->is_connected = false;
@@ -238,7 +241,7 @@ static void update_reading_statistics(const soil_reading_complete_result_t* resu
             (stats->average_reading_time_ms * (total_readings - 1) + result->total_reading_time_ms) / total_readings;
     }
 
-    ESP_LOGD(TAG, "Stats updated: success=%d, failed=%d, avg_humidity=%.1f%%",
+    ESP_LOGD(TAG, "Stats updated: success=%" PRIu32 ", failed=%" PRIu32 ", avg_humidity=%.1f%%",
              stats->successful_readings, stats->failed_readings, stats->average_soil_humidity_trend);
 }
 
@@ -276,7 +279,7 @@ esp_err_t read_soil_sensors_init(const safety_limits_t* safety_limits, uint8_t n
     memset(&g_soil_sensors_context.statistics, 0, sizeof(soil_sensors_statistics_t));
 
     // Inicializar el driver de infraestructura
-    esp_err_t ret = soil_moisture_driver_init(num_sensors, NULL);
+    esp_err_t ret = soil_moisture_driver_init(NULL, num_sensors);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize soil moisture driver: %s", esp_err_to_name(ret));
         return ret;
@@ -315,7 +318,7 @@ soil_reading_complete_result_t read_soil_sensors_read_all(const ambient_sensor_d
 
     // Usar el driver de infraestructura para leer todos los sensores
     soil_sensor_data_t raw_sensor_data = {0};
-    esp_err_t driver_result = soil_moisture_driver_read_all_sensors(&raw_sensor_data, temperature_celsius);
+    esp_err_t driver_result = soil_moisture_driver_read_all_sensors(temperature_celsius, &raw_sensor_data);
 
     // Procesar resultados del driver y convertir a formato de aplicación
     uint8_t successful_sensors = 0;
@@ -409,7 +412,7 @@ soil_reading_complete_result_t read_soil_sensors_read_all(const ambient_sensor_d
     // Actualizar estadísticas
     update_reading_statistics(&result);
 
-    ESP_LOGI(TAG, "Soil sensors read completed: %d/%d successful, avg=%.1f%%, variance=%.1f, time=%dms",
+    ESP_LOGI(TAG, "Soil sensors read completed: %d/%d successful, avg=%.1f%%, variance=%.1f, time=%" PRIu32 "ms",
              successful_sensors, g_soil_sensors_context.num_sensors_configured,
              result.average_soil_humidity, result.humidity_variance, result.total_reading_time_ms);
 
@@ -432,8 +435,8 @@ soil_reading_result_t read_soil_sensors_read_individual(uint8_t sensor_number,
     ESP_LOGD(TAG, "Reading individual sensor %d", sensor_number);
 
     // Usar el driver de infraestructura para leer sensor individual
-    float humidity_percent = 0.0;
-    esp_err_t ret = soil_moisture_driver_read_sensor(sensor_number, &humidity_percent, ambient_temperature);
+    soil_moisture_driver_state_t driver_state; // Estructura de infrastructure
+    esp_err_t ret = soil_moisture_driver_read_sensor(sensor_number, ambient_temperature, &driver_state);
 
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to read sensor %d: %s", sensor_number, esp_err_to_name(ret));
@@ -448,10 +451,10 @@ soil_reading_result_t read_soil_sensors_read_individual(uint8_t sensor_number,
     }
 
     // Convertir resultado del driver a estado de aplicación
-    convert_driver_state_to_application_state(sensor_number, humidity_percent,
+    convert_driver_state_to_application_state(sensor_number, driver_state.humidity_percentage,
                                              ambient_temperature, sensor_state);
 
-    ESP_LOGD(TAG, "Sensor %d individual read: %.1f%% humidity", sensor_number, humidity_percent);
+    ESP_LOGD(TAG, "Sensor %d individual read: %.1f%% humidity", sensor_number, driver_state.humidity_percentage);
 
     return sensor_state->reading_status;
 }
@@ -476,20 +479,17 @@ esp_err_t read_soil_sensors_calibrate_sensor(uint8_t sensor_number, uint8_t cali
 
     // Delegar calibración al driver de infraestructura
     esp_err_t ret;
-    int calibrated_value = 0;
 
     if (calibration_type == 0) {
         // Calibración air-dry (0% humedad)
-        ret = soil_moisture_driver_calibrate_air_dry(sensor_number, &calibrated_value);
-        if (ret == ESP_OK) {
-            g_soil_sensors_context.calibrations[sensor_number - 1].air_dry_adc_value = calibrated_value;
-        }
+        ret = soil_moisture_driver_calibrate_air_dry(sensor_number);
+        ESP_LOGI(TAG, "Air-dry calibration %s for sensor %d",
+                 ret == ESP_OK ? "completed" : "failed", sensor_number);
     } else {
         // Calibración water-saturated (100% humedad)
-        ret = soil_moisture_driver_calibrate_water_saturated(sensor_number, &calibrated_value);
-        if (ret == ESP_OK) {
-            g_soil_sensors_context.calibrations[sensor_number - 1].water_saturated_adc_value = calibrated_value;
-        }
+        ret = soil_moisture_driver_calibrate_water_saturated(sensor_number);
+        ESP_LOGI(TAG, "Water-saturated calibration %s for sensor %d",
+                 ret == ESP_OK ? "completed" : "failed", sensor_number);
     }
 
     if (ret == ESP_OK) {
@@ -497,7 +497,7 @@ esp_err_t read_soil_sensors_calibrate_sensor(uint8_t sensor_number, uint8_t cali
             esp_timer_get_time() / 1000000;
         g_soil_sensors_context.statistics.calibration_events++;
 
-        ESP_LOGI(TAG, "Sensor %d calibrated successfully, ADC value: %d", sensor_number, calibrated_value);
+        ESP_LOGI(TAG, "Sensor %d calibrated successfully", sensor_number);
     } else {
         ESP_LOGE(TAG, "Failed to calibrate sensor %d: %s", sensor_number, esp_err_to_name(ret));
     }

@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "driver/gpio.h"
+#include "irrigation_status.h"  // Para valve_state_t del dominio
 
 /**
  * @file valve_control_driver.h
@@ -24,23 +25,14 @@
 
 /**
  * @brief Configuración de pines GPIO para válvulas
+ * NOTA: Pines ultra-seguros seleccionados para evitar bootstrap pins (GPIO0,2,5,12,15)
+ * Referencia: https://lastminuteengineers.com/esp32-pinout-reference/
  */
-#define VALVE_1_GPIO_PIN        GPIO_NUM_2    // Válvula 1
-#define VALVE_2_GPIO_PIN        GPIO_NUM_4    // Válvula 2
-#define VALVE_3_GPIO_PIN        GPIO_NUM_5    // Válvula 3
+#define VALVE_1_GPIO_PIN        GPIO_NUM_21   // Válvula 1 - ULTRA SEGURO
+#define VALVE_2_GPIO_PIN        GPIO_NUM_22   // Válvula 2 - ULTRA SEGURO
+#define VALVE_3_GPIO_PIN        GPIO_NUM_23   // Válvula 3 - ULTRA SEGURO
 
-/**
- * @brief Estados posibles de válvula
- */
-typedef enum {
-    VALVE_STATE_CLOSED = 0,                   // Válvula cerrada
-    VALVE_STATE_OPENING,                      // Válvula abriéndose
-    VALVE_STATE_OPEN,                         // Válvula abierta
-    VALVE_STATE_CLOSING,                      // Válvula cerrándose
-    VALVE_STATE_ERROR,                        // Error en válvula
-    VALVE_STATE_UNKNOWN,                      // Estado desconocido
-    VALVE_STATE_MAX
-} valve_state_t;
+// Estados de válvula están definidos en el dominio (irrigation_status.h)
 
 /**
  * @brief Tipos de error de válvula
@@ -61,29 +53,7 @@ typedef enum {
 /**
  * @brief Estado completo de válvula individual
  */
-typedef struct {
-    uint8_t valve_number;                     // Número válvula (1-3)
-    gpio_num_t gpio_pin;                      // Pin GPIO asignado
-    valve_state_t current_state;              // Estado actual
-    valve_state_t target_state;               // Estado objetivo
-    valve_error_type_t last_error;            // Último error detectado
-
-    // Tiempos de operación
-    uint32_t state_change_timestamp;          // Última cambio de estado
-    uint32_t total_open_time_ms;              // Tiempo total abierta
-    uint32_t current_session_start_time;      // Inicio sesión actual
-
-    // Estadísticas de operación
-    uint32_t open_operations_count;           // Número de aperturas
-    uint32_t close_operations_count;          // Número de cierres
-    uint32_t error_count;                     // Número de errores
-    uint32_t successful_operations;           // Operaciones exitosas
-
-    // Estado de hardware
-    bool is_initialized;                      // Si está inicializada
-    bool is_relay_energized;                  // Si el relé está energizado
-    uint16_t response_time_ms;                // Tiempo respuesta última operación
-} valve_status_t;
+// Estado de válvula está definido en el dominio (irrigation_status.h)
 
 /**
  * @brief Configuración del sistema de válvulas
@@ -300,19 +270,19 @@ esp_err_t valve_control_driver_health_check(void);
  *
  * @param stats Puntero donde escribir estadísticas
  */
-void valve_control_driver_get_statistics(valve_system_statistics_t* stats);
+esp_err_t valve_control_driver_get_statistics(valve_system_statistics_t* stats);
 
 /**
  * @brief Resetear estadísticas del sistema
  */
-void valve_control_driver_reset_statistics(void);
+esp_err_t valve_control_driver_reset_statistics(void);
 
 /**
  * @brief Obtener configuración actual
  *
  * @param config Puntero donde escribir configuración
  */
-void valve_control_driver_get_config(valve_control_config_t* config);
+esp_err_t valve_control_driver_get_config(valve_control_config_t* config);
 
 /**
  * @brief Actualizar configuración

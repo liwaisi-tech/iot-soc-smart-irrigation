@@ -25,11 +25,13 @@
 
 /**
  * @brief Configuración de pines GPIO para LED
+ * NOTA: Pines ultra-seguros para evitar bootstrap pins y conflictos con DHT22
+ * Referencia: https://lastminuteengineers.com/esp32-pinout-reference/
  */
-#define LED_RED_GPIO_PIN           GPIO_NUM_16   // LED Rojo
-#define LED_GREEN_GPIO_PIN         GPIO_NUM_17   // LED Verde
-#define LED_BLUE_GPIO_PIN          GPIO_NUM_18   // LED Azul
-#define LED_STATUS_GPIO_PIN        GPIO_NUM_2    // LED Estado (si solo hay uno)
+#define LED_RED_GPIO_PIN           GPIO_NUM_27   // LED Rojo - ULTRA SEGURO
+#define LED_GREEN_GPIO_PIN         GPIO_NUM_26   // LED Verde - ULTRA SEGURO
+#define LED_BLUE_GPIO_PIN          GPIO_NUM_16   // LED Azul - SEGURO
+#define LED_STATUS_GPIO_PIN        GPIO_NUM_25   // LED Estado - ULTRA SEGURO
 
 /**
  * @brief Colores de LED soportados
