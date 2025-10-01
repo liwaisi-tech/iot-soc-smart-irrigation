@@ -12,18 +12,18 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-// Headers de la aplicación - Arquitectura Hexagonal
+// Headers de la aplicación - Component-Based Architecture
 #include "wifi_adapter.h"
 #include "http_adapter.h"
 #include "device_config_service.h"
 #include "shared_resource_manager.h"
-#include "dht_sensor.h"
+#include "sensor_reader.h"           // Nuevo componente unificado de sensores
 // TODO: Uncomment when implementations are created
 // #include "use_cases/device_registration.h"
 // #include "use_cases/read_sensors.h"
 // #include "use_cases/control_irrigation.h"
 #include "mqtt_adapter.h"
-#include "publish_sensor_data.h"
+#include "ambient_sensor_data.h"     // Para compatibilidad temporal con MQTT
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
 static bool s_http_adapter_initialized = false;
@@ -171,14 +171,27 @@ void app_main(void)
     ESP_LOGI(TAG, "Inicializando sistema de recursos compartidos...");
     ESP_ERROR_CHECK(shared_resource_manager_init());
     
-    // Inicializar sensor DHT22 en GPIO_NUM_4
-    ESP_LOGI(TAG, "Inicializando sensor DHT22 en GPIO 4...");
-    ret = dht_sensor_init(GPIO_NUM_4);
+    // Inicializar componente sensor_reader (DHT22 + sensores de suelo)
+    ESP_LOGI(TAG, "Inicializando componente sensor_reader...");
+    sensor_config_t sensor_cfg = {
+        .soil_sensor_count = 3,
+        .enable_soil_filtering = true,
+        .filter_window_size = 5,
+        .dht22_gpio = GPIO_DHT22,           // Definido en common_types.h como 18
+        .dht22_read_timeout_ms = 2000,
+        .adc_attenuation = ADC_ATTEN_DB_11,
+        .soil_cal_dry_mv = {2800, 2800, 2800},
+        .soil_cal_wet_mv = {1200, 1200, 1200},
+        .max_consecutive_errors = 5
+    };
+    ret = sensor_reader_init(&sensor_cfg);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Error al inicializar sensor DHT22: %s", esp_err_to_name(ret));
-        ESP_LOGE(TAG, "El sistema continuará sin sensor de temperatura/humedad");
+        ESP_LOGE(TAG, "Error al inicializar sensor_reader: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "CRITICAL: Sistema no puede funcionar sin sensores");
+        ESP_ERROR_CHECK(ESP_FAIL);  // Forzar reinicio
     } else {
-        ESP_LOGI(TAG, "Sensor DHT22 inicializado correctamente en GPIO 4");
+        ESP_LOGI(TAG, "Sensor reader inicializado: DHT22 (GPIO %d) + %d sensores suelo",
+                 GPIO_DHT22, sensor_cfg.soil_sensor_count);
     }
     
     // Inicializar servicio de configuración del dispositivo

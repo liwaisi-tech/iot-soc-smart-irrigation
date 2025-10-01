@@ -1,9 +1,10 @@
 idf_component_register(
     SRCS
         "sensor_reader.c"
-        "dht22_driver.c"
+        "drivers/dht22/dht.c"       # DHT22 driver (importado de iot-mqtt-temp-sensor)
+        "drivers/moisture_sensor/moisture_sensor.c"  # Soil moisture sensor driver
         "soil_adc_driver.c"
-    INCLUDE_DIRS "."
+    INCLUDE_DIRS "." "drivers/dht22"  # Agregar path para dht.h
     PRIV_INCLUDE_DIRS "."
     REQUIRES
         esp_adc

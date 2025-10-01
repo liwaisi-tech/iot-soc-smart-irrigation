@@ -69,3 +69,5 @@ dependencies.lock
 .vscode/*
 
 .cache
+
+.DS_Store
