@@ -1,0 +1,22 @@
+# ESP32 Partition Table - Smart Irrigation System (4MB Flash, No OTA)
+# Name,     Type, SubType,  Offset,   Size,     Flags
+# Bootloader is automatically placed at 0x1000 by ESP-IDF
+
+# NVS (Non-Volatile Storage) - Configuration data
+# Stores: WiFi credentials, MQTT config, device settings, crop parameters
+nvs,        data, nvs,      0x9000,   24K,
+
+# PHY Init - RF calibration data
+phy_init,   data, phy,      ,         4K,
+
+# Factory App - Main application partition
+# 2MB allows significant growth (current app ~200KB)
+factory,    app,  factory,  0x10000,  2048K,
+
+# SPIFFS - File system for data storage
+# ~1.9MB for sensor reading history, offline logs, calibration data
+# Supports ~30 days of sensor logs without connectivity
+spiffs,     data, spiffs,   ,         1920K,
+
+# Total flash usage: ~4MB
+# OTA updates postponed - Manual flashing via USB required for firmware updates

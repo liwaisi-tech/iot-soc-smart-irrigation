@@ -242,6 +242,7 @@ Infrastructure Layer → Application Layer → Domain Layer
 
 ### Power Requirements
 - **ESP32**: 3.3V, 240mA (active), 5μA (deep sleep)
+- **Flash Memory**: 4MB (standard ESP32 DevKit)
 - **DHT22**: 3.3-5V, 2.5mA (active), 60μA (standby)
 - **Soil Sensors**: 3.3V, 5mA each
 - **Relay Module**: 5V, 70mA per relay
@@ -550,7 +551,7 @@ curl http://192.168.1.100/ping
 ## Deployment Considerations
 
 ### Hardware Requirements
-- **Microcontroller**: ESP32 DevKit (38-pin recommended)
+- **Microcontroller**: ESP32 DevKit with 4MB flash (38-pin recommended)
 - **Environmental Sensor**: DHT22 (temperature/humidity)
 - **Soil Sensors**: Capacitive soil moisture sensors (1-3 units)
 - **Irrigation Control**: 5V relay module (1-3 channels)
@@ -584,7 +585,7 @@ curl http://192.168.1.100/ping
 - **MQTT Broker**: Cloud-hosted or local server
 - **Dashboard**: Real-time sensor monitoring
 - **Alerts**: Low battery, connectivity issues, sensor failures
-- **OTA Updates**: Remote firmware updates for field devices
+- **Firmware Updates**: Manual flashing via USB (OTA postponed to Phase 5)
 
 ## Getting Started for Developers
 
@@ -645,10 +646,11 @@ File: esp32_smart_irrigation_agent_prompt.md
 
 **Current Phase**: Phase 4 (Irrigation Control) - IN PROGRESS
 **Optimization Status**: ✅ COMPLETED - Memory Optimized Build
+**Flash Configuration**: 4MB (No OTA support - Manual USB updates)
 **Next Milestone**: Complete valve control and offline irrigation logic
-**Ready for**: Production deployment in rural Colombian markets
+**Ready for**: Production deployment in rural Colombian markets with manual firmware updates
 
-The codebase is production-ready for sensor monitoring and data communication with **~72KB memory optimization** completed while preserving hexagonal architecture. Irrigation control features are currently in development, with offline mode safety features prioritized for rural reliability.
+The codebase is production-ready for sensor monitoring and data communication with **~72KB memory optimization** completed while preserving hexagonal architecture. Irrigation control features are currently in development, with offline mode safety features prioritized for rural reliability. **OTA updates are postponed to Phase 5** - current deployment requires USB connection for firmware updates.
 
 ### Memory Optimization Results (v1.1.0)
 
