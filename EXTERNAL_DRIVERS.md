@@ -111,7 +111,68 @@ cp components/infrastructure/drivers/dht_sensor/include/dht_sensor.h \
 #define DHT22_GPIO  GPIO_NUM_18  // Changed from GPIO_NUM_4
 ```
 
-**Priority:** ✅ READY TO MIGRATE
+**Priority:** ✅ **NIVEL 1 COMPLETED** - Ready for sensor_reader integration
+
+**NIVEL 1 Enhancements (✅ COMPLETED):**
+- `dht_read_ambient_data()` wrapper for `ambient_data_t` compatibility
+- Automatic retry with backoff (3 attempts, 2.5s delay)
+- Automatic timestamp generation
+- Enhanced error logging
+
+**Post-Migration Improvements Planned:**
+See detailed roadmap in section "DHT22 Driver Improvement Roadmap" below.
+
+---
+
+## DHT22 Driver Improvement Roadmap (Post-Migration)
+
+**Current Status:** ✅ NIVEL 1 implemented
+**Remaining Work:** NIVEL 2-4 optimizations
+
+### NIVEL 2: Production Readiness 🔴 (3 hours - HIGH PRIORITY)
+
+**Features:**
+1. **Throttling/Cache:** Prevent reads <2s, cache last valid reading
+2. **Range Validation:** Reject impossible values (-40-80°C, 0-100%)
+
+**Expected Impact:** 90% reduction in timing errors, 100% invalid reading rejection
+
+**When:** Before first field deployment
+
+---
+
+### NIVEL 3: Field Optimization 🟡 (2 hours - MEDIUM PRIORITY)
+
+**Features:**
+1. **Dynamic Configuration:** Adjust retries/delays via NVS/MQTT
+2. **Diagnostic Logging:** Phase timing, retry patterns
+
+**Expected Impact:** 30% error reduction via field-specific tuning, 60% less debugging time
+
+**When:** After 1 week production data
+
+---
+
+### NIVEL 4: Advanced Monitoring 🟢 (2 hours - LOW PRIORITY)
+
+**Features:**
+1. **Health Statistics API:** Track success rates, detect sensor degradation
+
+**Expected Impact:** 2-7 days advance warning of failures, predictive maintenance
+
+**When:** After 1 month production
+
+---
+
+**Implementation Timeline:**
+- NIVEL 1: 2h ✅ COMPLETED
+- NIVEL 2: 3h → Before deployment 🔴
+- NIVEL 3: 2h → After 1 week 🟡
+- NIVEL 4: 2h → After 1 month 🟢
+
+**Total:** 9 hours for complete optimization
+
+See `MIGRATION_MAP.md` section "Post-Migration Improvements - DHT22 Driver Optimization" for detailed technical specs.
 
 ---
 

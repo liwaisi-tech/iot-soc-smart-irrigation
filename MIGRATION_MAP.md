@@ -600,4 +600,83 @@ void sensor_reading_task(void* params) {
 
 ---
 
+## Post-Migration Improvements - DHT22 Driver Optimization
+
+### Overview
+
+The DHT22 driver has been migrated with **NIVEL 1** improvements (wrapper + retry logic) implemented. This section documents planned improvements for **NIVEL 2-4** to be executed after the complete component-based migration is stable.
+
+**Current Implementation Status:**
+- ✅ **NIVEL 1 COMPLETED:** `dht_read_ambient_data()` wrapper with automatic retry (3 attempts, 2.5s backoff)
+- ⏳ **NIVEL 2-4:** Planned for post-migration optimization
+
+---
+
+### Phase 1: NIVEL 2 - Production Readiness (HIGH PRIORITY) 🔴
+
+**When to Execute:**
+- Trigger: Component migration completed and tested
+- Trigger: First field deployment scheduled
+- Trigger: Rural connectivity issues observed in testing
+
+**Duration:** 3 hours
+**Impact:** 🔴 **CRITICAL** - Essential for reliable field operation
+
+#### 2.1 Intelligent Throttling & Cache System
+**Problem:** DHT22 requires minimum 2s between reads, rapid calls cause sensor lockup
+**Expected Impact:** Prevents 90% of timing errors, reduces power consumption
+
+#### 2.2 Range Validation
+**Problem:** Corrupted readings can pass checksum but contain impossible values
+**Expected Impact:** Eliminates 100% of out-of-range readings affecting irrigation decisions
+
+---
+
+### Phase 2: NIVEL 3 - Field Optimization (MEDIUM PRIORITY) 🟡
+
+**When to Execute:**
+- After 1 week of production data
+- Retry statistics show optimization opportunities
+
+**Duration:** 2 hours
+**Impact:** 🟡 **MEDIUM** - Enables remote tuning and diagnostics
+
+#### 3.1 Dynamic Configuration
+**Problem:** Different field conditions need different retry strategies
+**Expected Impact:** 30% reduction in false errors via field-specific tuning
+
+#### 3.2 Enhanced Diagnostic Logging
+**Problem:** Remote troubleshooting is difficult without detailed timing data
+**Expected Impact:** 60% reduction in field debugging time
+
+---
+
+### Phase 3: NIVEL 4 - Advanced Monitoring (LOW PRIORITY) 🟢
+
+**When to Execute:**
+- After 1 month production operation
+- Predictive maintenance program initiated
+
+**Duration:** 2 hours
+**Impact:** 🟢 **LOW** - Predictive maintenance capabilities
+
+#### 4.1 Health Statistics API
+**Features:** Track success rates, detect failing sensors before complete failure
+**Expected Impact:** 2-7 days advance warning of sensor failures
+
+---
+
+## Implementation Timeline
+
+| Phase | Priority | Duration | Cumulative | Trigger |
+|-------|----------|----------|------------|---------|
+| NIVEL 1 | 🔴 CRITICAL | 2h | 2h | Before migration ✅ |
+| NIVEL 2 | 🔴 HIGH | 3h | 5h | Pre-deployment |
+| NIVEL 3 | 🟡 MEDIUM | 2h | 7h | After 1 week |
+| NIVEL 4 | 🟢 LOW | 2h | 9h | After 1 month |
+
+See `EXTERNAL_DRIVERS.md` section "DHT22 Driver Improvement Roadmap" for detailed technical implementation.
+
+---
+
 **Next Document:** See `EXTERNAL_DRIVERS.md` for drivers to import from external repositories.
