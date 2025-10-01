@@ -184,19 +184,32 @@ esp_err_t sensor_reader_get_soil(soil_data_t* data)
 
     uint8_t successful_reads = 0;
 
+    // Buffers para logs compactos (DEBUG level)
+    int raw_values[3] = {0};
+    int humidity_values[3] = {0};
+
     // Leer cada sensor de suelo configurado
     for (uint8_t i = 0; i < s_config.soil_sensor_count && i < 3; i++) {
         sensor_type_t sensor_type = (sensor_type_t)(SENSOR_TYPE_SOIL_1 + i);
         s_sensor_health[sensor_type].total_reads++;
 
         int humidity_percent = 0;
+        int raw_adc = 0;
 
-        // Llamar driver de sensor de humedad del suelo
-        // API: sensor_read_percentage(channel, &humidity, sensor_type)
-        sensor_read_percentage(SOIL_ADC_CHANNELS[i], &humidity_percent, TYPE_CAP);
+        // Llamar nueva API que retorna RAW + porcentaje
+        esp_err_t ret = sensor_read_with_raw(
+            SOIL_ADC_CHANNELS[i],
+            &humidity_percent,
+            &raw_adc,
+            TYPE_CAP
+        );
 
-        // Validar rango de lectura (0-100%)
-        if (humidity_percent >= 0 && humidity_percent <= 100) {
+        // Guardar valores para log compacto
+        raw_values[i] = raw_adc;
+        humidity_values[i] = humidity_percent;
+
+        // Validar resultado
+        if (ret == ESP_OK && humidity_percent >= 0 && humidity_percent <= 100) {
             // Lectura válida
             data->soil_humidity[i] = (float)humidity_percent;
             successful_reads++;
@@ -207,8 +220,6 @@ esp_err_t sensor_reader_get_soil(soil_data_t* data)
             s_sensor_health[sensor_type].is_healthy = true;
             s_sensor_health[sensor_type].last_value = (float)humidity_percent;
             s_sensor_health[sensor_type].last_read_time = data->timestamp;
-
-            ESP_LOGD(TAG, "Soil sensor %d: %d%%", i, humidity_percent);
         } else {
             // Lectura inválida
             data->soil_humidity[i] = 0.0f;
@@ -221,12 +232,21 @@ esp_err_t sensor_reader_get_soil(soil_data_t* data)
                          i, s_sensor_health[sensor_type].error_count);
             }
 
-            ESP_LOGW(TAG, "Soil sensor %d invalid reading: %d%% (error count: %d)",
-                     i, humidity_percent, s_sensor_health[sensor_type].error_count);
+            ESP_LOGW(TAG, "Soil sensor %d invalid reading: RAW=%d, %%=%d (error count: %d)",
+                     i, raw_adc, humidity_percent, s_sensor_health[sensor_type].error_count);
         }
     }
 
     data->sensor_count = successful_reads;
+
+    // ============================================================================
+    // DEBUG LOG - Formato Compacto (solo visible con nivel DEBUG activo)
+    // ============================================================================
+    // Mostrar valores RAW para calibración manual
+    // Para activar: idf.py menuconfig → Component config → Log output → Debug
+    ESP_LOGD(TAG, "Soil sensors: [RAW: %d/%d/%d] [%%: %d/%d/%d]",
+             raw_values[0], raw_values[1], raw_values[2],
+             humidity_values[0], humidity_values[1], humidity_values[2]);
 
     // Retornar error solo si TODOS los sensores fallaron
     if (successful_reads == 0) {

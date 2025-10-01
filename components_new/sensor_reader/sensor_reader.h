@@ -89,9 +89,11 @@ typedef struct {
     // ADC configuration
     adc_atten_t adc_attenuation;    ///< ADC attenuation (default: ADC_ATTEN_DB_11)
 
-    // Calibration (soil moisture sensors)
-    uint16_t soil_cal_dry_mv[3];    ///< Calibration: dry soil voltage (mV)
-    uint16_t soil_cal_wet_mv[3];    ///< Calibration: wet soil voltage (mV)
+    // Calibration (soil moisture sensors) - [PHASE 2 FEATURE]
+    // Currently not used - manual calibration via #define in moisture_sensor.c
+    // Will be loaded from NVS and configurable via WiFi Provisioning UI
+    uint16_t soil_cal_dry_mv[3];    ///< Calibration: dry soil voltage (mV) - Future use
+    uint16_t soil_cal_wet_mv[3];    ///< Calibration: wet soil voltage (mV) - Future use
 
     // Error handling
     uint8_t max_consecutive_errors; ///< Max errors before marking unhealthy
@@ -198,13 +200,29 @@ esp_err_t sensor_reader_reset_errors(sensor_type_t type);
 /**
  * @brief Calibrate soil moisture sensor
  *
- * Sets calibration values for dry and wet conditions.
- * Used to convert raw ADC values to percentage.
+ * [NOT CURRENTLY USED - Phase 2 Feature]
+ *
+ * CURRENT WORKFLOW: Manual calibration via #define in moisture_sensor.c
+ * 1. Enable DEBUG logs to view RAW ADC values
+ * 2. Note values in dry/wet conditions from logs
+ * 3. Update #define VALUE_WHEN_DRY_CAP and VALUE_WHEN_WET_CAP
+ * 4. Recompile and flash firmware
+ *
+ * FUTURE PHASE 2: Dynamic calibration from WiFi Provisioning UI and Raspberry API
+ * - User triggers calibration from web interface during first setup
+ * - Values stored in NVS for persistence across reboots
+ * - No firmware recompilation needed
+ * - Accessible via HTTP API: POST /api/calibrate/{sensor_index}
+ *
+ * This function will set calibration values for dry and wet conditions
+ * and save them to NVS.
  *
  * @param sensor_index Soil sensor index (0-2)
- * @param dry_mv Voltage reading for dry soil (mV)
- * @param wet_mv Voltage reading for wet soil (mV)
+ * @param dry_mv Voltage reading for dry soil (mV) - measured in field
+ * @param wet_mv Voltage reading for wet soil (mV) - measured after irrigation
  * @return ESP_OK on success, ESP_ERR_INVALID_ARG if invalid index
+ *
+ * @note Will be activated in Phase 2 when WiFi Provisioning UI is ready
  */
 esp_err_t sensor_reader_calibrate_soil(uint8_t sensor_index,
                                        uint16_t dry_mv,
@@ -212,6 +230,11 @@ esp_err_t sensor_reader_calibrate_soil(uint8_t sensor_index,
 
 /**
  * @brief Get soil sensor calibration values
+ *
+ * [NOT CURRENTLY USED - Phase 2 Feature]
+ *
+ * Retrieves current calibration values from configuration.
+ * In Phase 2, these will be loaded from NVS on startup.
  *
  * @param sensor_index Soil sensor index (0-2)
  * @param[out] dry_mv Pointer to store dry calibration value

@@ -34,44 +34,75 @@ static bool s_http_adapter_initialized = false;
 #define SENSOR_PUBLISH_INTERVAL_MS        30000  // 30 seconds
 
 /**
- * @brief Sensor publishing task
+ * @brief Sensor publishing task (Component-Based Architecture)
  *
- * Periodically reads sensor data and publishes it via MQTT.
+ * Periodically reads all sensors (DHT22 + soil) and publishes data via MQTT.
  * Uses vTaskDelayUntil() for precise 30-second intervals.
  * Handles failures gracefully by continuing the publishing loop.
  * Implements anti-deadlock measures for WiFi provisioning compatibility.
  */
 static void sensor_publishing_task(void *pvParameters)
 {
-    ESP_LOGI(TAG, "Starting sensor publishing task (Core 1, Priority 3)");
+    ESP_LOGI(TAG, "Sensor publishing task started (Component-Based Architecture)");
 
-    TickType_t xLastWakeTime;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(SENSOR_PUBLISH_INTERVAL_MS);
     uint32_t cycle_count = 0;
 
-    // Initialize xLastWakeTime with current time
-    xLastWakeTime = xTaskGetTickCount();
-
     while (1) {
-        // Wait for the next cycle
+        // Wait for the next cycle (30 seconds)
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
-
         cycle_count++;
 
-        // Execute the sensor publishing use case
-        esp_err_t ret = publish_sensor_data_use_case();
+        // 1. LEER TODOS LOS SENSORES usando nuevo componente
+        sensor_reading_t reading;
+        esp_err_t ret = sensor_reader_get_all(&reading);
+
         if (ret != ESP_OK) {
-            // Reduced logging frequency to avoid deadlocks during WiFi provisioning
-            if (cycle_count % 10 == 0) {  // Log only every 10th cycle if errors persist
-                ESP_LOGW(TAG, "Sensor cycle %" PRIu32 " failed: %s",
+            // Falló lectura de sensores - log reducido para evitar spam
+            if (cycle_count % 10 == 0) {
+                ESP_LOGW(TAG, "Cycle %" PRIu32 ": Sensor read failed: %s",
                          cycle_count, esp_err_to_name(ret));
             }
+            continue;  // Saltar publicación si no hay datos válidos
         }
 
-        // Log memory status less frequently to reduce logging contention
-        if (cycle_count % 5 == 0) {  // Log every 5th cycle (every 2.5 minutes)
-            ESP_LOGI(TAG, "Sensor cycle %" PRIu32 " completed - Free heap: %" PRIu32 " bytes",
-                    cycle_count, esp_get_free_heap_size());
+        // 2. LOG DE DATOS LEÍDOS (cada 5 ciclos = 2.5 minutos)
+        if (cycle_count % 5 == 0) {
+            ESP_LOGI(TAG, "Cycle %" PRIu32 ": T=%.1f°C H=%.1f%% Soil=[%.1f%%, %.1f%%, %.1f%%] - Heap:%" PRIu32,
+                     cycle_count,
+                     reading.ambient.temperature,
+                     reading.ambient.humidity,
+                     reading.soil.soil_humidity[0],
+                     reading.soil.soil_humidity[1],
+                     reading.soil.soil_humidity[2],
+                     esp_get_free_heap_size());
+        }
+
+        // 3. VERIFICAR CONECTIVIDAD MQTT antes de publicar
+        if (!mqtt_adapter_is_connected()) {
+            if (cycle_count % 10 == 0) {
+                ESP_LOGW(TAG, "MQTT not connected, skipping data publish");
+            }
+            continue;
+        }
+
+        // 4. PUBLICAR VÍA MQTT (adaptar temporalmente a formato viejo)
+        // NOTA: mqtt_adapter espera ambient_sensor_data_t, adaptar hasta migrar MQTT
+        ambient_sensor_data_t mqtt_data = {
+            .ambient_temperature = reading.ambient.temperature,
+            .ambient_humidity = reading.ambient.humidity
+        };
+
+        ret = mqtt_adapter_publish_sensor_data(&mqtt_data);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "MQTT publish failed: %s", esp_err_to_name(ret));
+            continue;
+        }
+
+        // Éxito - log solo cada 10 ciclos (5 minutos)
+        if (cycle_count % 10 == 0) {
+            ESP_LOGI(TAG, "Cycle %" PRIu32 ": Data published successfully to MQTT", cycle_count);
         }
     }
 }
