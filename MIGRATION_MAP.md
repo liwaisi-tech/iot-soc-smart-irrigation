@@ -4,10 +4,28 @@
 
 This document maps the migration from the current hexagonal architecture to the new component-based architecture for the Smart Irrigation System.
 
-**Migration Strategy:** Complete migration - new architecture in `components_new/` directory
+**Migration Strategy:** Incremental migration - new architecture in `components_new/` directory
 
-**Date:** 2025-10-01
+**Date Updated:** 2025-10-03
 **Version:** From v1.1.0 (Hexagonal) → v2.0.0 (Component-Based)
+
+---
+
+## 🔴 MIGRATION PRINCIPLE
+
+### **MIGRATE EXISTING FIRST, NEW FEATURES SECOND**
+
+**Current Status**: Only `sensor_reader` component migrated
+
+**Critical Rule**:
+✅ Complete migration of ALL existing components BEFORE implementing new features
+❌ DO NOT implement `irrigation_controller` or `system_monitor` until migration is complete
+
+**Rationale**:
+1. Validates component-based architecture with proven code
+2. Isolates migration issues from new feature bugs
+3. Maintains `components/` as working fallback
+4. Enables incremental testing and validation
 
 ---
 
@@ -62,17 +80,18 @@ components_new/
 
 ## Component Migration Matrix
 
-| Old (Hexagonal) | New (Component-Based) | Files to Migrate | Status |
-|-----------------|----------------------|------------------|--------|
-| `infrastructure/adapters/wifi_adapter/` | `wifi_manager/` | wifi_adapter.c, wifi_connection_manager.c, wifi_prov_manager.c, boot_counter.c | ⏳ Pending |
-| `infrastructure/adapters/mqtt_adapter/` + `application/use_cases/publish_sensor_data.c` | `mqtt_client/` | mqtt_adapter.c, mqtt_client_manager.c, publish_sensor_data.c | ⏳ Pending |
-| `infrastructure/drivers/dht_sensor/` + EXTERNAL soil drivers | `sensor_reader/` | dht_sensor.c + **IMPORT external drivers** | ⏳ Pending |
-| **NEW** | `irrigation_controller/` | **NEW implementation** with logic from Logica_de_riego.md | ⏳ Pending |
-| `domain/services/device_config_service.c` | `device_config/` | device_config_service.c | ⏳ Pending |
-| **NEW** | `system_monitor/` | **NEW implementation** | ⏳ Pending |
-| `infrastructure/adapters/http_adapter/` | `http_server/` | http_adapter.c, server.c, endpoints/*.c | ⏳ Pending |
-| `infrastructure/adapters/json_device_serializer.c` | Integrated into `mqtt_client/` and `http_server/` | json_device_serializer.c | ⏳ Pending |
-| `infrastructure/adapters/shared_resource_manager.c` | Remove (use direct semaphores in components) | shared_resource_manager.c | ⏳ Pending |
+| Prioridad | Old (Hexagonal) | New (Component-Based) | Files to Migrate | Status |
+|-----------|-----------------|----------------------|------------------|--------|
+| **COMPLETADO** | `infrastructure/drivers/dht_sensor/` + soil drivers | `sensor_reader/` | dht_sensor.c + moisture drivers | ✅ Migrado |
+| 🔴 **Paso 1** | `infrastructure/adapters/wifi_adapter/` | `wifi_manager/` | wifi_adapter.c, wifi_connection_manager.c, wifi_prov_manager.c, boot_counter.c | ⏳ Pendiente |
+| 🔴 **Paso 2** | `infrastructure/adapters/mqtt_adapter/` + `application/use_cases/publish_sensor_data.c` | `mqtt_client/` | mqtt_adapter.c, mqtt_client_manager.c, publish_sensor_data.c | ⏳ Pendiente |
+| 🟡 **Paso 3** | `infrastructure/adapters/http_adapter/` | `http_server/` | http_adapter.c, server.c, endpoints/*.c | ⏳ Pendiente |
+| 🟡 **Paso 4** | `domain/services/device_config_service.c` | `device_config/` | device_config_service.c | ⏳ Pendiente |
+| 🔴 **Paso 5** | `main/iot-soc-smart-irrigation.c` | Actualizar a components_new/ | main.c | ⏳ Pendiente |
+| **DESPUÉS** | **NEW** - Funcionalidad NUEVA | `irrigation_controller/` | **NEW implementation** con Logica_de_riego.md | ❌ NO Iniciado |
+| **DESPUÉS** | **NEW** - Funcionalidad NUEVA | `system_monitor/` | **NEW implementation** | ❌ NO Iniciado |
+| Integrar | `infrastructure/adapters/json_device_serializer.c` | Integrar en `mqtt_client/` y `http_server/` | json_device_serializer.c | ⏳ Pendiente |
+| Eliminar | `infrastructure/adapters/shared_resource_manager.c` | Usar semáforos directos | shared_resource_manager.c | ⏳ Pendiente |
 
 ---
 
@@ -525,37 +544,53 @@ void sensor_reading_task(void* params) {
 
 ## Migration Checklist
 
+### ✅ Preparación (COMPLETADO)
 - [x] Create `components_new/` structure
 - [x] Create all component headers (.h files)
 - [x] Create all CMakeLists.txt files
 - [x] Create common_types.h
-- [ ] Implement wifi_manager.c
-- [ ] Implement mqtt_client.c
-- [ ] Implement sensor_reader.c (+ import soil drivers)
-- [ ] Implement irrigation_controller.c (new)
-- [ ] Implement device_config.c
-- [ ] Implement system_monitor.c (new)
-- [ ] Implement http_server.c
-- [ ] Update main.c for component-based
-- [ ] Update root CMakeLists.txt
-- [ ] Test compilation
-- [ ] Test individual components
-- [ ] Test full system integration
-- [ ] Performance validation
-- [ ] Remove old `components/` directory
+- [x] Implement sensor_reader.c (+ moisture sensor drivers)
+
+### 🔴 FASE 1: Migrar Componentes Existentes (CRÍTICO - EN PROGRESO)
+- [ ] **Paso 1**: Implement wifi_manager.c
+- [ ] **Paso 2**: Implement mqtt_client.c
+- [ ] **Paso 3**: Implement http_server.c
+- [ ] **Paso 4**: Implement device_config.c
+- [ ] **Paso 5**: Update main.c to use components_new/ exclusively
+- [ ] **Paso 6**: Test compilation (sistema completo compila)
+- [ ] **Paso 7**: Validate on hardware (WiFi + MQTT + HTTP functional)
+
+### 🟡 FASE 2: Nuevas Funcionalidades (DESPUÉS DE FASE 1)
+- [ ] Implement irrigation_controller.c (NUEVO - no migración)
+- [ ] Implement system_monitor.c (NUEVO - no migración)
+- [ ] Test offline irrigation logic
+- [ ] Test safety interlocks
+
+### 🟢 FASE 3: Limpieza Final
+- [ ] Performance validation (memoria, estabilidad)
+- [ ] Remove old `components/` directory (solo después de validar todo)
+- [ ] Update root CMakeLists.txt (final cleanup)
 
 ---
 
-## Timeline Estimate
+## Timeline Estimate (ACTUALIZADO)
 
-| Phase | Task | Duration |
-|-------|------|----------|
-| 1 | Structure & Headers | 2 hours | ✅ COMPLETED
-| 2 | Core Components (wifi, mqtt, sensor) | 4 hours | ⏳ PENDING
-| 3 | New Components (irrigation, monitor) | 4 hours | ⏳ PENDING
-| 4 | Support Components (config, http) | 2 hours | ⏳ PENDING
-| 5 | Integration & Testing | 4 hours | ⏳ PENDING
-| **Total** | | **16 hours** |
+| Phase | Task | Duration | Status |
+|-------|------|----------|--------|
+| Prep | Structure & Headers + sensor_reader | 3 hours | ✅ COMPLETADO |
+| **FASE 1** | **Migración Componentes Existentes** | **8-12 horas** | **⏳ PENDIENTE** |
+| 1.1 | wifi_manager migration | 2-3 hours | ⏳ Pendiente |
+| 1.2 | mqtt_client migration | 2-3 hours | ⏳ Pendiente |
+| 1.3 | http_server migration | 2-3 hours | ⏳ Pendiente |
+| 1.4 | device_config migration | 1 hour | ⏳ Pendiente |
+| 1.5 | main.c update + compilation | 1-2 hours | ⏳ Pendiente |
+| 1.6 | Hardware validation | 2 hours | ⏳ Pendiente |
+| **FASE 2** | **Nuevas Funcionalidades** | **12-16 horas** | **❌ NO INICIADO** |
+| 2.1 | irrigation_controller (NEW) | 6-8 hours | ❌ NO Iniciado |
+| 2.2 | system_monitor (NEW) | 3-4 hours | ❌ NO Iniciado |
+| 2.3 | Testing & validation | 3-4 hours | ❌ NO Iniciado |
+| **FASE 3** | **Cleanup & Optimization** | **2-4 horas** | **❌ NO INICIADO** |
+| **Total** | | **~30 hours** | **10% completado** |
 
 ---
 
@@ -576,27 +611,35 @@ void sensor_reading_task(void* params) {
 
 ## Success Criteria
 
-✅ **Architecture:**
-- All 7 components implemented and functional
-- Direct dependencies, no abstraction layers
-- <15 total source files
+### ✅ FASE 1 - Migración Componentes Existentes (CRÍTICO)
 
-✅ **Functionality:**
-- DHT22 sensor reading operational
-- MQTT publishing working (data + registration)
-- HTTP endpoints responding
-- Irrigation logic functional (online + offline modes)
-- WiFi provisioning working
+**Criterio de Éxito**: Sistema funciona IGUAL que arquitectura hexagonal
 
-✅ **Performance:**
-- Memory usage <150KB RAM
-- Compilation successful
-- System uptime >24 hours stable
+- [ ] Todos los componentes existentes migrados (wifi, mqtt, http, config)
+- [ ] Sistema compila sin errores
+- [ ] WiFi provisioning funcional en hardware
+- [ ] MQTT publishing funcional en hardware
+- [ ] HTTP endpoints respondiendo en hardware
+- [ ] Memoria usage <200KB RAM, <1MB Flash
+- [ ] Sistema estable 24+ horas
+- [ ] No regressions vs arquitectura hexagonal
 
-✅ **Quality:**
-- Code follows ESP32 best practices
-- Component health checks functional
-- Logging comprehensive
+### 🟡 FASE 2 - Nuevas Funcionalidades (DESPUÉS)
+
+**Criterio de Éxito**: Features nuevas implementadas y funcionando
+
+- [ ] irrigation_controller implementado y probado
+- [ ] system_monitor implementado y probado
+- [ ] Lógica de riego offline funcional (4 modos)
+- [ ] Safety interlocks validados
+- [ ] Calibración dinámica de sensores funcional
+
+### 🟢 FASE 3 - Limpieza Final
+
+- [ ] Arquitectura limpia, components/ removido
+- [ ] Documentación actualizada
+- [ ] Performance validated
+- [ ] Ready for production
 
 ---
 

@@ -1,15 +1,44 @@
 # CLAUDE.md - Smart Irrigation System Project Guide
 
+**Last Updated**: 2025-10-03
+**Version**: 1.2.0 - Component-Based Architecture (En Migración)
+
+---
+
+## 🔴 CRITICAL: MIGRATION PRINCIPLE (READ FIRST)
+
+### **MIGRATE EXISTING FIRST, NEW FEATURES SECOND**
+
+**Current Status**: Migrating from Hexagonal → Component-Based Architecture
+
+**REGLA DE ORO**:
+✅ **DO**: Migrar TODOS los componentes existentes ANTES de implementar features nuevas
+❌ **DON'T**: Probar hardware sin sistema compilable completo
+❌ **DON'T**: Implementar `irrigation_controller` o `system_monitor` hasta completar migración
+❌ **DON'T**: Mezclar debugging de migración con debugging de features nuevas
+
+**Rationale**:
+1. Valida arquitectura component-based con código probado
+2. Aísla problemas: ¿Falla migración o feature?
+3. Mantiene `components/` como respaldo funcional
+4. Permite validación incremental y rollback rápido
+
+**Estado Actual**:
+- ✅ sensor_reader migrado
+- ⏳ wifi_manager, mqtt_client, http_server, device_config PENDIENTES
+- ❌ irrigation_controller, system_monitor NO INICIADOS (implementar DESPUÉS)
+
+---
+
 ## Project Overview
 
-This is a **Smart Irrigation System** IoT project built with **ESP-IDF** for ESP32, implementing **Hexagonal Architecture** (Ports and Adapters) with **Domain Driven Design** (DDD). The system monitors environmental and soil sensors, controls irrigation valves via MQTT, and provides HTTP endpoints for device information.
+This is a **Smart Irrigation System** IoT project built with **ESP-IDF** for ESP32, currently **migrating** from Hexagonal Architecture to **Component-Based Architecture**.
 
 **Target Market**: Rural Colombia
-**Architecture**: Hexagonal (Clean Architecture)
+**Architecture**: Component-Based (Migrating from Hexagonal)
 **Framework**: ESP-IDF v5.4.2
 **Language**: C (Clean Code for embedded systems)
 **IDE**: Visual Studio Code with ESP-IDF extension
-**Specialized Agent**: Use `esp32_smart_irrigation_agent_prompt.md` for AI assistance
 
 ## Project Structure & Architecture
 

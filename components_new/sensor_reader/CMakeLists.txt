@@ -10,6 +10,7 @@ idf_component_register(
         driver
         esp_driver_gpio
         esp_netif           # Para esp_netif_get_handle_from_ifkey()
+        esp_idf_lib_helpers # Para ets_sys.h usado por dht.c
     PRIV_REQUIRES
         esp_timer
         nvs_flash

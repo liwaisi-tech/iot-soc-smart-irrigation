@@ -1,5 +1,33 @@
 # Arquitectura por Componentes ESP32 - Sistema Riego Inteligente
 
+**Fecha última actualización**: 2025-10-03
+**Versión**: 2.0.0 - Component-Based Architecture
+
+---
+
+## 🔴 PRINCIPIO FUNDAMENTAL DE MIGRACIÓN
+
+### **MIGRAR PRIMERO, FEATURES DESPUÉS**
+
+**Regla de Oro**: NO mezclar cambios de arquitectura con funcionalidad nueva
+
+✅ **HACER**:
+1. Migrar componentes existentes de arquitectura hexagonal
+2. Validar que sistema funciona igual que antes
+3. LUEGO implementar funcionalidades nuevas
+
+❌ **NO HACER**:
+- Probar hardware sin sistema compilable completo
+- Implementar features nuevas antes de terminar migración
+- Mezclar debugging de migración con debugging de features
+
+**Rationale**:
+- Aísla problemas: ¿Falla la migración o la feature?
+- Reduce riesgo: components/ queda como respaldo
+- Permite validación incremental
+
+---
+
 ## 🎯 ARQUITECTURA RECOMENDADA: Component-Based para ESP32
 
 ### Principios Arquitecturales Aplicables
@@ -554,26 +582,43 @@ esp_err_t sensor_reader_get_soil_calibration(uint8_t sensor_index, uint16_t* dry
 
 ---
 
-### 🚀 **PRÓXIMOS PASOS**
+### 🚀 **PLAN DE MIGRACIÓN (PRÓXIMOS PASOS)**
 
-#### **Corto Plazo (1-2 semanas)**
-1. ⏳ Probar `sensor_reader` en hardware real
-2. ⏳ Calibrar sensores capacitivos en campo (Colombia rural)
-3. ⏳ Verificar datos MQTT publicados correctamente
-4. ⏳ Migrar `mqtt_adapter` para publicar `sensor_reading_t` completo (incluir datos suelo)
+Ver documento `ESTADO_ACTUAL_IMPLEMENTACION.md` para plan detallado completo.
 
-#### **Mediano Plazo (Fase 2 - 1-2 meses)**
-1. ⏳ Implementar WiFi Provisioning UI con calibración de sensores
-2. ⏳ Agregar endpoints HTTP para valores RAW en JSON
-3. ⏳ Implementar guardado/carga de calibración en NVS
-4. ⏳ API REST en Raspberry Pi para reconfiguración remota
-5. ⏳ Migrar componentes restantes (`mqtt_client`, `irrigation_controller`)
+#### 🔴 **FASE 1: MIGRACIÓN COMPONENTES EXISTENTES** (Prioridad CRÍTICA - 1-2 días)
 
-#### **Largo Plazo (Fase 3+)**
-1. ⏳ Control de riego automático basado en umbrales
-2. ⏳ Modo offline con decisiones locales
-3. ⏳ Dashboard web en tiempo real
-4. ⏳ Machine learning para predicción de riego
+**Objetivo**: Sistema funcional equivalente a arquitectura hexagonal
+
+1. [ ] Migrar wifi_manager (de infrastructure/adapters/wifi_adapter/)
+2. [ ] Migrar mqtt_client (de infrastructure/adapters/mqtt_adapter/)
+3. [ ] Migrar http_server (de infrastructure/adapters/http_adapter/)
+4. [ ] Migrar device_config (de domain/services/device_config_service/)
+5. [ ] Actualizar main.c para usar components_new/
+6. [ ] Compilar sistema completo
+7. [ ] Validar en hardware (WiFi + MQTT + HTTP)
+
+**Criterio de Éxito**: Sistema compila y funciona igual que hexagonal
+
+---
+
+#### 🟡 **FASE 2: NUEVAS FUNCIONALIDADES** (Después de Fase 1 - 2-3 semanas)
+
+**Requisito**: Fase 1 completada y validada
+
+8. [ ] Implementar irrigation_controller (NUEVO)
+9. [ ] Implementar system_monitor (NUEVO)
+10. [ ] Calibración dinámica de sensores
+11. [ ] Lógica de riego offline
+
+---
+
+#### 🟢 **FASE 3: OPTIMIZACIÓN** (Largo Plazo)
+
+12. [ ] Optimización energética
+13. [ ] Testing completo
+14. [ ] Dashboard web
+15. [ ] Machine learning
 
 ---
 
@@ -592,18 +637,27 @@ esp_err_t sensor_reader_get_soil_calibration(uint8_t sensor_index, uint16_t* dry
 
 ### 🎓 **LECCIONES APRENDIDAS**
 
+#### **Decisiones de Migración**
+1. 🔴 **MIGRAR PRIMERO, FEATURES DESPUÉS** (CRÍTICO)
+   - ✅ Evita mezclar cambios de arquitectura con funcionalidad nueva
+   - ✅ Permite validación incremental del sistema
+   - ✅ Reduce riesgo al mantener components/ como respaldo
+   - ✅ Facilita debugging al aislar problemas
+   - ❌ NO probar hardware sin sistema compilable completo
+   - ❌ NO implementar features nuevas antes de migrar existentes
+
 #### **Decisiones Arquitecturales**
-1. ✅ **Component-Based > Hexagonal** para ESP32 embedded
+2. ✅ **Component-Based > Hexagonal** para ESP32 embedded
    - Menos overhead de memoria
    - APIs más directas y simples
    - Mejor para sistemas resource-constrained
 
-2. ✅ **Calibración manual primero, dinámica después**
+3. ✅ **Calibración manual primero, dinámica después**
    - Evita complejidad prematura
    - Ahorra ~20 KB Flash (sin esp_console)
    - Funcional para prototipo y pruebas de campo
 
-3. ✅ **Logs DEBUG en lugar de comandos de consola**
+4. ✅ **Logs DEBUG en lugar de comandos de consola**
    - Mismo propósito, cero overhead cuando desactivado
    - Activable/desactivable en menuconfig
    - Formato compacto evita spam
@@ -669,22 +723,28 @@ idf.py size-components
 
 ### ✅ **CRITERIOS DE ÉXITO**
 
-**Fase 1 (Actual) - ✅ COMPLETADO**:
-- [x] Componente `sensor_reader` compila sin errores
-- [x] Integración con `main.c` funcional
-- [x] Sistema lee DHT22 cada 30s
-- [x] Sistema lee 3 sensores de suelo cada 30s
-- [x] Logs DEBUG muestran valores RAW para calibración
-- [x] Publica datos MQTT (temporal: solo ambient)
-- [x] Manejo robusto de errores (no crashea si sensor falla)
-- [x] Memoria < 200 KB RAM, < 1 MB Flash
+**Fase Actual: Migración Component sensor_reader - ✅ COMPLETADO**:
+- [x] Componente `sensor_reader` migrado sin errores
+- [x] Lectura DHT22 funcional
+- [x] Lectura 3 sensores de suelo funcional
+- [x] Logs DEBUG con valores RAW
+- [x] Health monitoring implementado
+- [x] Memoria optimizada
 
-**Fase 2 (Próxima) - ⏳ PENDIENTE**:
-- [ ] Calibración dinámica desde WiFi Provisioning UI
-- [ ] Guardar calibración en NVS
-- [ ] API REST para calibración remota (Raspberry)
-- [ ] Publicar `sensor_reading_t` completo vía MQTT (incluir suelo)
-- [ ] Endpoint HTTP `/sensors/raw` con valores ADC en JSON
+**Siguiente Fase: Migración Componentes Existentes - ⏳ PENDIENTE**:
+- [ ] wifi_manager migrado y compilando
+- [ ] mqtt_client migrado y compilando
+- [ ] http_server migrado y compilando
+- [ ] device_config migrado y compilando
+- [ ] main.c actualizado a components_new/
+- [ ] Sistema compila sin errores
+- [ ] Validado en hardware (WiFi + MQTT + HTTP)
+
+**Fase Futura: Nuevas Funcionalidades - ❌ NO INICIADO**:
+- [ ] irrigation_controller implementado
+- [ ] system_monitor implementado
+- [ ] Calibración dinámica de sensores
+- [ ] Lógica de riego offline
 
 ---
 

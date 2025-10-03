@@ -18,6 +18,7 @@
 #include "esp_netif.h"              // Para IP address
 #include <string.h>
 #include <time.h>
+#include <inttypes.h>               // Para PRIu32
 
 static const char *TAG = "sensor_reader";
 
@@ -228,11 +229,11 @@ esp_err_t sensor_reader_get_soil(soil_data_t* data)
             // Marcar como no saludable si supera el límite
             if (s_sensor_health[sensor_type].error_count >= s_config.max_consecutive_errors) {
                 s_sensor_health[sensor_type].is_healthy = false;
-                ESP_LOGE(TAG, "Soil sensor %d marked unhealthy after %d errors",
+                ESP_LOGE(TAG, "Soil sensor %d marked unhealthy after %" PRIu32 " errors",
                          i, s_sensor_health[sensor_type].error_count);
             }
 
-            ESP_LOGW(TAG, "Soil sensor %d invalid reading: RAW=%d, %%=%d (error count: %d)",
+            ESP_LOGW(TAG, "Soil sensor %d invalid reading: RAW=%d, %%=%d (error count: %" PRIu32 ")",
                      i, raw_adc, humidity_percent, s_sensor_health[sensor_type].error_count);
         }
     }
@@ -310,7 +311,7 @@ esp_err_t sensor_reader_get_all(sensor_reading_t* reading)
 
     // Retornar éxito si AL MENOS UNO de los sensores funcionó
     if (ambient_ret == ESP_OK || soil_ret == ESP_OK) {
-        ESP_LOGD(TAG, "Reading #%u complete (ambient:%s, soil:%s)",
+        ESP_LOGD(TAG, "Reading #%" PRIu32 " complete (ambient:%s, soil:%s)",
                  reading->reading_id,
                  ambient_ret == ESP_OK ? "OK" : "FAIL",
                  soil_ret == ESP_OK ? "OK" : "FAIL");

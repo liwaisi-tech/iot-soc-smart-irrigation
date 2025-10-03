@@ -1,21 +1,41 @@
 # Estado Actual de Implementación - Sistema Riego Inteligente
-**Fecha última actualización**: 2025-10-01
+**Fecha última actualización**: 2025-10-03
 **Versión**: 1.2.0 - Component-Based Architecture (En Progreso)
 
 ---
 
-## 🎯 **FASE ACTUAL: Migración a Arquitectura Component-Based**
+## 🎯 **FASE ACTUAL: Migración de Componentes Existentes a Component-Based**
 
 ### **Estado General**
-- ✅ **Arquitectura Hexagonal**: Funcional pero siendo migrada
-- 🚧 **Arquitectura Component-Based**: En implementación activa
-- ✅ **Componente sensor_reader**: Implementado y funcional
-- ✅ **Integración con main.c**: Completada
-- ✅ **Sistema compila**: Binary 905 KB (dentro del límite)
+- ✅ **Arquitectura Hexagonal** (components/): Funcional y operativa (respaldo)
+- 🚧 **Arquitectura Component-Based** (components_new/): En migración activa
+- ✅ **Componente sensor_reader**: Migrado y funcional
+- ⏳ **Sistema completo**: Aún usa arquitectura hexagonal en main.c
+- ⚠️ **Sistema NO compila** completamente con components_new/ hasta migrar todos los componentes
+
+### **Prioridad Actual**
+🔴 **MIGRAR componentes existentes PRIMERO, features nuevas DESPUÉS**
+- Rationale: Validar que arquitectura component-based funciona con código probado
+- Objetivo: Sistema funcional equivalente a hexagonal antes de agregar features
 
 ---
 
-## 📦 **COMPONENTES IMPLEMENTADOS**
+## 📦 **ESTADO DE COMPONENTES**
+
+| Componente | Estado Migración | Prioridad | Origen |
+|------------|------------------|-----------|--------|
+| **sensor_reader** | ✅ COMPLETADO | - | components/infrastructure/drivers/dht_sensor |
+| **wifi_manager** | ⏳ PENDIENTE | 🔴 CRÍTICA (paso 1) | components/infrastructure/adapters/wifi_adapter |
+| **mqtt_client** | ⏳ PENDIENTE | 🔴 CRÍTICA (paso 2) | components/infrastructure/adapters/mqtt_adapter |
+| **http_server** | ⏳ PENDIENTE | 🟡 ALTA (paso 3) | components/infrastructure/adapters/http_adapter |
+| **device_config** | ⏳ PENDIENTE | 🟡 ALTA (paso 4) | components/domain/services/device_config_service |
+| **main.c** | ⏳ PENDIENTE | 🔴 CRÍTICA (paso 5) | Actualizar a components_new/ |
+| **irrigation_controller** | ❌ NO INICIADO | 🟢 MEDIA (DESPUÉS validación) | Funcionalidad NUEVA |
+| **system_monitor** | ❌ NO INICIADO | 🟢 BAJA (DESPUÉS validación) | Funcionalidad NUEVA |
+
+---
+
+## 📦 **COMPONENTES MIGRADOS**
 
 ### **1. sensor_reader (✅ COMPLETADO)**
 
@@ -216,26 +236,114 @@ esp_err_t sensor_reader_get_soil_calibration(uint8_t sensor_index, uint16_t* dry
 
 ---
 
-## 🚀 **PRÓXIMOS PASOS**
+## 🚀 **PLAN DE MIGRACIÓN (PRÓXIMOS PASOS)**
 
-### **Corto Plazo (1-2 semanas)**
-1. ⏳ Probar sensor_reader en hardware real
-2. ⏳ Calibrar sensores capacitivos en campo (Colombia rural)
-3. ⏳ Verificar datos MQTT publicados correctamente
-4. ⏳ Migrar `mqtt_adapter` para publicar `sensor_reading_t` completo (incluir datos suelo)
+### ✅ **COMPLETADO**
+- [x] Componente sensor_reader migrado y funcional
+- [x] Estructura components_new/ creada
+- [x] common_types.h definido
 
-### **Mediano Plazo (Fase 2 - 1-2 meses)**
-1. ⏳ Implementar WiFi Provisioning UI con calibración de sensores
-2. ⏳ Agregar endpoints HTTP para valores RAW en JSON
-3. ⏳ Implementar guardado/carga de calibración en NVS
-4. ⏳ API REST en Raspberry Pi para reconfiguración remota
-5. ⏳ Migrar componentes restantes (`mqtt_client`, `irrigation_controller`)
+---
 
-### **Largo Plazo (Fase 3+)**
-1. ⏳ Control de riego automático basado en umbrales
-2. ⏳ Modo offline con decisiones locales
-3. ⏳ Dashboard web en tiempo real
-4. ⏳ Machine learning para predicción de riego
+### 🔴 **FASE 1: MIGRACIÓN DE COMPONENTES EXISTENTES** (Prioridad CRÍTICA)
+
+**Objetivo**: Sistema funcional completo con arquitectura component-based usando código ya probado
+
+**Duración Estimada**: 1-2 días
+**Criterio de Éxito**: Sistema equivalente a arquitectura hexagonal compilando y funcionando
+
+#### **Pasos de Migración**
+
+1. **[ ] Migrar wifi_manager**
+   - Origen: `components/infrastructure/adapters/wifi_adapter/`
+   - Consolidar: wifi_adapter.c + wifi_connection_manager.c + wifi_prov_manager.c + boot_counter.c
+   - Destino: `components_new/wifi_manager/wifi_manager.c` (1 archivo)
+   - Funcionalidad: Provisioning, reconexión, NVS credentials
+   - **Estado**: ⏳ PENDIENTE
+
+2. **[ ] Migrar mqtt_client**
+   - Origen: `components/infrastructure/adapters/mqtt_adapter/` + `components/application/use_cases/publish_sensor_data.c`
+   - Consolidar: mqtt_adapter.c + mqtt_client_manager.c + publish_sensor_data.c
+   - Destino: `components_new/mqtt_client/mqtt_client.c` (1 archivo)
+   - Funcionalidad: WebSocket MQTT, publishing, registration
+   - **Estado**: ⏳ PENDIENTE
+
+3. **[ ] Migrar http_server**
+   - Origen: `components/infrastructure/adapters/http_adapter/`
+   - Consolidar: http_adapter.c + server.c + endpoints/*.c + middleware (simplificado)
+   - Destino: `components_new/http_server/http_server.c` (1 archivo)
+   - Funcionalidad: Endpoints /whoami, /sensors, /ping
+   - **Estado**: ⏳ PENDIENTE
+
+4. **[ ] Migrar device_config**
+   - Origen: `components/domain/services/device_config_service/`
+   - Simplificar: Remover abstracción de dominio
+   - Destino: `components_new/device_config/device_config.c` (1 archivo)
+   - Funcionalidad: NVS management directo
+   - **Estado**: ⏳ PENDIENTE
+
+5. **[ ] Actualizar main.c**
+   - Cambiar includes: de components/ a components_new/
+   - Simplificar inicialización: llamadas directas a componentes
+   - Eliminar capas de abstracción hexagonal
+   - **Estado**: ⏳ PENDIENTE
+
+6. **[ ] Compilar sistema completo**
+   - Resolver errores de compilación
+   - Verificar tamaño de binary (objetivo: <1MB Flash, <200KB RAM)
+   - **Estado**: ⏳ PENDIENTE
+
+7. **[ ] Validar en hardware**
+   - Flashear ESP32
+   - Probar WiFi provisioning
+   - Probar MQTT publishing (sensor_reader data)
+   - Probar HTTP endpoints
+   - **Criterio**: Sistema funciona igual que arquitectura hexagonal
+   - **Estado**: ⏳ PENDIENTE
+
+---
+
+### 🟡 **FASE 2: NUEVAS FUNCIONALIDADES** (Después de Fase 1)
+
+**Requisito**: Fase 1 completada y validada en hardware
+
+**Objetivo**: Agregar control de riego y monitoreo avanzado
+
+**Duración Estimada**: 2-3 semanas
+
+#### **Pasos de Implementación**
+
+8. **[ ] Implementar irrigation_controller** (NUEVO)
+   - Crear desde cero basado en `Logica_de_riego.md`
+   - Implementación: irrigation_controller.c + valve_driver.c + safety_logic.c
+   - Funcionalidad: Control de válvulas, lógica de riego, modo offline
+   - **Estado**: ❌ NO INICIADO
+
+9. **[ ] Implementar system_monitor** (NUEVO)
+   - Crear desde cero para health monitoring
+   - Funcionalidad: Component health checks, memory monitoring
+   - **Estado**: ❌ NO INICIADO
+
+10. **[ ] Calibración dinámica de sensores**
+    - WiFi Provisioning UI con calibración
+    - Guardar/cargar calibración en NVS
+    - API REST para reconfiguración remota
+    - **Estado**: ❌ NO INICIADO
+
+11. **[ ] Lógica de riego offline**
+    - 4 modos adaptativos (Normal/Warning/Critical/Emergency)
+    - Thresholds basados en dataset Colombia
+    - Safety interlocks
+    - **Estado**: ❌ NO INICIADO
+
+---
+
+### 🟢 **FASE 3: OPTIMIZACIÓN Y PRODUCCIÓN** (Largo Plazo)
+
+12. **[ ] Optimización energética** (sleep modes)
+13. **[ ] Testing completo** (unitario e integración)
+14. **[ ] Dashboard web** en tiempo real
+15. **[ ] Machine learning** para predicción de riego
 
 ---
 
@@ -260,18 +368,27 @@ esp_err_t sensor_reader_get_soil_calibration(uint8_t sensor_index, uint16_t* dry
 
 ## 🎓 **LECCIONES APRENDIDAS**
 
+### **Decisiones de Migración**
+1. 🔴 **MIGRAR PRIMERO, FEATURES DESPUÉS** (CRÍTICO)
+   - ✅ Evita mezclar cambios de arquitectura con funcionalidad nueva
+   - ✅ Permite validación incremental del sistema
+   - ✅ Reduce riesgo al mantener components/ como respaldo
+   - ✅ Facilita debugging al aislar problemas de migración vs implementación
+   - ❌ NO probar hardware sin sistema compilable completo
+   - ❌ NO implementar features nuevas antes de migrar existentes
+
 ### **Decisiones Arquitecturales**
-1. ✅ **Component-Based > Hexagonal** para ESP32 embedded
+2. ✅ **Component-Based > Hexagonal** para ESP32 embedded
    - Menos overhead de memoria
    - APIs más directas y simples
    - Mejor para sistemas resource-constrained
 
-2. ✅ **Calibración manual primero, dinámica después**
+3. ✅ **Calibración manual primero, dinámica después**
    - Evita complejidad prematura
    - Ahorra ~20 KB Flash (sin esp_console)
    - Funcional para prototipo y pruebas de campo
 
-3. ✅ **Logs DEBUG en lugar de comandos de consola**
+4. ✅ **Logs DEBUG en lugar de comandos de consola**
    - Mismo propósito, cero overhead
    - Activable/desactivable en menuconfig
    - Formato compacto evita spam
@@ -333,27 +450,40 @@ idf.py size-components
 
 ---
 
-## ✅ **CRITERIOS DE ÉXITO ACTUALES**
+## ✅ **CRITERIOS DE ÉXITO**
 
-**Fase 1 (Actual) - ✅ COMPLETADO**:
-- [x] Componente `sensor_reader` compila sin errores
-- [x] Integración con `main.c` funcional
-- [x] Sistema lee DHT22 cada 30s
-- [x] Sistema lee 3 sensores de suelo cada 30s
-- [x] Logs DEBUG muestran valores RAW para calibración
-- [x] Publica datos MQTT (temporal: solo ambient)
-- [x] Manejo robusto de errores (no crashea si sensor falla)
-- [x] Memoria < 200 KB RAM, < 1 MB Flash
+### **Fase Actual: Migración Component sensor_reader - ✅ COMPLETADO**
+- [x] Componente `sensor_reader` migrado sin errores
+- [x] Lectura DHT22 funcional
+- [x] Lectura 3 sensores de suelo funcional
+- [x] Logs DEBUG con valores RAW
+- [x] Health monitoring implementado
+- [x] Memoria optimizada
 
-**Fase 2 (Próxima) - ⏳ PENDIENTE**:
-- [ ] Calibración dinámica desde WiFi Provisioning UI
-- [ ] Guardar calibración en NVS
-- [ ] API REST para calibración remota (Raspberry)
-- [ ] Publicar `sensor_reading_t` completo vía MQTT (incluir suelo)
-- [ ] Endpoint HTTP `/sensors/raw` con valores ADC en JSON
+### **Siguiente Fase: Migración Componentes Existentes - ⏳ PENDIENTE**
+**Criterio de Éxito Global**: Sistema completo compila y funciona equivalente a arquitectura hexagonal
+
+- [ ] wifi_manager migrado y compilando
+- [ ] mqtt_client migrado y compilando
+- [ ] http_server migrado y compilando
+- [ ] device_config migrado y compilando
+- [ ] main.c actualizado a components_new/
+- [ ] Sistema compila sin errores
+- [ ] WiFi provisioning funcional en hardware
+- [ ] MQTT publishing funcional en hardware
+- [ ] HTTP endpoints respondiendo en hardware
+- [ ] Memoria < 200 KB RAM, < 1 MB Flash
+- [ ] Sistema estable 24+ horas
+
+### **Fase Futura: Nuevas Funcionalidades - ❌ NO INICIADO**
+- [ ] irrigation_controller implementado
+- [ ] system_monitor implementado
+- [ ] Calibración dinámica de sensores
+- [ ] Lógica de riego offline
 
 ---
 
 **Mantenido por**: Liwaisi Tech
-**Última compilación exitosa**: 2025-10-01
-**Próxima revisión**: Después de pruebas en campo (Colombia rural)
+**Última actualización**: 2025-10-03
+**Próximo Milestone**: Completar Fase 1 - Migración de componentes existentes
+**Próxima revisión**: Después de validar sistema migrado en hardware

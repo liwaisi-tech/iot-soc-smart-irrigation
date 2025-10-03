@@ -175,6 +175,23 @@ esp_err_t device_config_get_crop_name(char* crop, size_t crop_len);
 esp_err_t device_config_set_crop_name(const char* crop);
 
 /**
+ * @brief Get device location
+ *
+ * @param[out] location Buffer to store device location (min 151 bytes)
+ * @param location_len Size of location buffer
+ * @return ESP_OK on success
+ */
+esp_err_t device_config_get_device_location(char* location, size_t location_len);
+
+/**
+ * @brief Set device location
+ *
+ * @param location Device location description (max 150 chars)
+ * @return ESP_OK on success
+ */
+esp_err_t device_config_set_device_location(const char* location);
+
+/**
  * @brief Get firmware version
  *
  * @param[out] version Buffer to store version (min 16 bytes)
@@ -356,9 +373,20 @@ esp_err_t device_config_set_reading_interval(uint16_t interval);
 #define DEVICE_CONFIG_DEFAULT_NAME          "ESP32_Riego_01"
 
 /**
+ * @brief Default device location
+ */
+#define DEVICE_CONFIG_DEFAULT_LOCATION      "Finca Colombia"
+
+/**
  * @brief Default crop name
  */
 #define DEVICE_CONFIG_DEFAULT_CROP          "tomates"
+
+/**
+ * @brief Maximum lengths for device info strings
+ */
+#define DEVICE_CONFIG_NAME_MAX_LEN          50
+#define DEVICE_CONFIG_LOCATION_MAX_LEN      150
 
 /**
  * @brief Firmware version (should match project version)
@@ -380,6 +408,7 @@ esp_err_t device_config_set_reading_interval(uint16_t interval);
  * @brief NVS keys for device info
  */
 #define DEVICE_CONFIG_NVS_KEY_NAME          "dev_name"
+#define DEVICE_CONFIG_NVS_KEY_LOCATION      "dev_loc"
 #define DEVICE_CONFIG_NVS_KEY_CROP          "crop_name"
 #define DEVICE_CONFIG_NVS_KEY_VERSION       "fw_version"
 
