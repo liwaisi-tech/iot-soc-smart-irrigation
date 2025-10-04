@@ -6,6 +6,9 @@ idf_component_register(
         esp_http_server
         json
         esp_event
+        sensor_reader      # For sensor_reading_t
+        device_config      # For device configuration
+        wifi_manager       # For MAC/IP address
     PRIV_REQUIRES
         esp_timer
 )

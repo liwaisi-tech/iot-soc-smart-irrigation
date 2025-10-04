@@ -117,7 +117,10 @@ typedef struct {
 /* ============================ DEVICE TYPES ============================ */
 
 /**
- * @brief Device configuration stored in NVS
+ * @brief System configuration stored in NVS (Component-Based Architecture)
+ *
+ * RENAMED from device_config_t to system_config_t to avoid conflict
+ * with hexagonal architecture's device_config_t (in device_config_service.h)
  *
  * Size: ~300 bytes
  */
@@ -150,7 +153,7 @@ typedef struct {
     // Safety Configuration
     float thermal_protection_temp;  ///< Temperature limit for auto-stop (40°C)
     bool enable_offline_mode;       ///< Enable offline irrigation mode
-} device_config_t;
+} system_config_t;
 
 /* ============================ SYSTEM MONITORING TYPES ============================ */
 

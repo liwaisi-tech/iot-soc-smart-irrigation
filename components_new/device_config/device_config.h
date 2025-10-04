@@ -212,10 +212,10 @@ esp_err_t device_config_get_mac_address(char* mac, size_t mac_len);
 /**
  * @brief Get complete device configuration
  *
- * @param[out] config Pointer to device_config_t structure to fill
+ * @param[out] config Pointer to system_config_t structure to fill
  * @return ESP_OK on success
  */
-esp_err_t device_config_get_all(device_config_t* config);
+esp_err_t device_config_get_all(system_config_t* config);
 
 /* ============================ WIFI CONFIG API ============================ */
 

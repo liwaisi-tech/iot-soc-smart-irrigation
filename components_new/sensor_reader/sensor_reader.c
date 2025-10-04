@@ -154,11 +154,11 @@ esp_err_t sensor_reader_get_ambient(ambient_data_t* data)
         // Marcar como no saludable si supera el límite de errores
         if (s_sensor_health[SENSOR_TYPE_DHT22].error_count >= s_config.max_consecutive_errors) {
             s_sensor_health[SENSOR_TYPE_DHT22].is_healthy = false;
-            ESP_LOGE(TAG, "DHT22 marked unhealthy after %d consecutive errors",
+            ESP_LOGE(TAG, "DHT22 marked unhealthy after %" PRIu32 " consecutive errors",
                      s_sensor_health[SENSOR_TYPE_DHT22].error_count);
         }
 
-        ESP_LOGW(TAG, "DHT22 read failed: %s (error count: %d)",
+        ESP_LOGW(TAG, "DHT22 read failed: %s (error count: %" PRIu32 ")",
                  esp_err_to_name(ret),
                  s_sensor_health[SENSOR_TYPE_DHT22].error_count);
     }
