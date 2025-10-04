@@ -2,9 +2,10 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-# Agregar SOLO el componente sensor_reader de la nueva arquitectura
-# (otros componentes en components_new/ son solo headers por ahora)
-set(EXTRA_COMPONENT_DIRS "components_new/sensor_reader")
+# Agregar componentes migrados de la nueva arquitectura
+# sensor_reader: ✅ Migrado y funcional
+# device_config: ✅ Migrado y funcional
+set(EXTRA_COMPONENT_DIRS "components_new/sensor_reader" "components_new/device_config")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(iot-soc-smart-irrigation)

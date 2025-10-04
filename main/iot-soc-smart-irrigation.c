@@ -15,7 +15,7 @@
 // Headers de la aplicación - Component-Based Architecture
 #include "wifi_adapter.h"
 #include "http_adapter.h"
-#include "device_config_service.h"
+#include "device_config.h"            // Nuevo componente device_config (migrado)
 #include "shared_resource_manager.h"
 #include "sensor_reader.h"           // Nuevo componente unificado de sensores
 // TODO: Uncomment when implementations are created
@@ -227,7 +227,7 @@ void app_main(void)
     
     // Inicializar servicio de configuración del dispositivo
     ESP_LOGI(TAG, "Inicializando servicio de configuración del dispositivo...");
-    ESP_ERROR_CHECK(device_config_service_init());
+    ESP_ERROR_CHECK(device_config_init());
 
     // 2. Inicialización de la capa de infraestructura
     ESP_LOGI(TAG, "Inicializando capa de Infraestructura...");

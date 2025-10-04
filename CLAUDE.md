@@ -1,6 +1,6 @@
 # CLAUDE.md - Smart Irrigation System Project Guide
 
-**Last Updated**: 2025-10-03
+**Last Updated**: 2025-10-04
 **Version**: 1.2.0 - Component-Based Architecture (En Migración)
 
 ---
@@ -12,7 +12,7 @@
 **Current Status**: Migrating from Hexagonal → Component-Based Architecture
 
 **REGLA DE ORO**:
-✅ **DO**: Migrar TODOS los componentes existentes ANTES de implementar features nuevas
+✅ **DO**: Migrar TODOS los componentes existentes ANTES de implementar features nuevas.✅ DO: La primera vez que consulte este archivo siempre revisa si el alance esta acorde a lo que hay en codigo sino notifica esto en tu respuesta.
 ❌ **DON'T**: Probar hardware sin sistema compilable completo
 ❌ **DON'T**: Implementar `irrigation_controller` o `system_monitor` hasta completar migración
 ❌ **DON'T**: Mezclar debugging de migración con debugging de features nuevas
@@ -23,10 +23,63 @@
 3. Mantiene `components/` como respaldo funcional
 4. Permite validación incremental y rollback rápido
 
-**Estado Actual**:
-- ✅ sensor_reader migrado
-- ⏳ wifi_manager, mqtt_client, http_server, device_config PENDIENTES
-- ❌ irrigation_controller, system_monitor NO INICIADOS (implementar DESPUÉS)
+**Estado Actual (40% completado)**:
+- ✅ **sensor_reader** migrado y compilando (448 líneas)
+- ✅ **device_config** migrado y compilando (1090 líneas)
+- ⏳ **wifi_manager, mqtt_client, http_server** PENDIENTES
+- ❌ **irrigation_controller, system_monitor** NO INICIADOS (implementar DESPUÉS)
+
+**Compilación Actual**: ✅ Binary 934 KB (56% free partition space)
+
+---
+
+## 📋 PRÓXIMA FASE CRÍTICA: ANÁLISIS ARQUITECTURAL
+
+### **Despues de la migración, ANALIZAR componentes migrados** (ver estado actual de la migración en @detalles_implementacion_nva_arqutectura.md)
+
+**Objetivo**: Validar que componentes migrados cumplen con Principios Arquitecturales
+
+#### **Principios a Validar** (según @detalles_implementacion_nva_arqutectura.md):
+
+1. ✅ **Single Responsibility Component (SRC)**
+   - Cada componente tiene UNA responsabilidad específica
+   - sensor_reader: Solo lectura de sensores
+   - device_config: Solo gestión de configuración
+
+2. ✅ **Minimal Interface Segregation (MIS)**
+   - Interfaces mínimas y específicas, no genéricas
+   - Evitar "god objects" con demasiadas funciones
+
+3. ✅ **Direct Dependencies (DD)**
+   - Dependencias directas sin abstracción excesiva
+   - Eliminar capas innecesarias
+
+4. ✅ **Memory-First Design**
+   - Arrays estáticos en lugar de malloc
+   - Stack allocation para datos temporales
+
+5. ✅ **Task-Oriented Architecture**
+   - Tareas con responsabilidad específica
+   - Stack size optimizado por tarea
+
+#### **Acciones Requeridas**:
+
+1. **[ ] Revisar sensor_reader** contra principios arquitecturales
+   - ¿Cumple SRC? (una sola responsabilidad)
+   - ¿API mínima y específica?
+   - ¿Dependencias directas?
+   - ¿Memory-first design?
+
+2. **[ ] Revisar device_config** contra principios arquitecturales
+   - ¿30+ funciones viola MIS?
+   - ¿Necesita subdivisión en sub-componentes?
+   - ¿Thread-safety apropiado?
+
+3. **[ ] Documentar conclusiones** en ESTADO_ACTUAL_IMPLEMENTACION.md
+
+4. **[ ] Aplicar refactorings** si es necesario.
+
+**SOLO DESPUÉS** de este análisis: Continuar con el analisis arquitectual para wifi_manager, mqtt_client, http_server
 
 ---
 
