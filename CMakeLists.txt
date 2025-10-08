@@ -2,10 +2,19 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-# Agregar componentes migrados de la nueva arquitectura
+# Agregar componentes migrados de la nueva arquitectura component-based
 # sensor_reader: ✅ Migrado y funcional
 # device_config: ✅ Migrado y funcional
-set(EXTRA_COMPONENT_DIRS "components_new/sensor_reader" "components_new/device_config")
+# wifi_manager: ✅ Migrado y funcional
+# mqtt_client: ✅ Migrado y funcional
+# http_server: ✅ Migrado y funcional
+set(EXTRA_COMPONENT_DIRS
+    "components_new/sensor_reader"
+    "components_new/device_config"
+    "components_new/wifi_manager"
+    "components_new/mqtt_client"
+    "components_new/http_server"
+)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(iot-soc-smart-irrigation)

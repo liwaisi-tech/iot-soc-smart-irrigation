@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "mqtt_client.c"
+    SRCS "mqtt_adapter.c"
     INCLUDE_DIRS "."
     PRIV_INCLUDE_DIRS "."
     REQUIRES

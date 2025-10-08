@@ -12,21 +12,16 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-// Headers de la aplicación - Component-Based Architecture
-#include "wifi_adapter.h"
-#include "http_adapter.h"
-#include "device_config.h"            // Nuevo componente device_config (migrado)
+// Headers de la aplicación - Component-Based Architecture (MIGRATED)
+#include "wifi_manager.h"            // Migrated from wifi_adapter
+#include "http_server.h"             // Migrated from http_adapter
+#include "mqtt_client_manager.h"     // Migrated from mqtt_adapter
+#include "device_config.h"           // Migrated component
 #include "shared_resource_manager.h"
-#include "sensor_reader.h"           // Nuevo componente unificado de sensores
-// TODO: Uncomment when implementations are created
-// #include "use_cases/device_registration.h"
-// #include "use_cases/read_sensors.h"
-// #include "use_cases/control_irrigation.h"
-#include "mqtt_adapter.h"
-#include "ambient_sensor_data.h"     // Para compatibilidad temporal con MQTT
+#include "sensor_reader.h"           // Migrated component - unified sensor interface
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
-static bool s_http_adapter_initialized = false;
+static bool s_http_server_initialized = false;
 
 // Task configuration constants
 #define SENSOR_PUBLISH_TASK_STACK_SIZE    4096
@@ -80,21 +75,16 @@ static void sensor_publishing_task(void *pvParameters)
         }
 
         // 3. VERIFICAR CONECTIVIDAD MQTT antes de publicar
-        if (!mqtt_adapter_is_connected()) {
+        if (!mqtt_client_is_connected()) {
             if (cycle_count % 10 == 0) {
                 ESP_LOGW(TAG, "MQTT not connected, skipping data publish");
             }
             continue;
         }
 
-        // 4. PUBLICAR VÍA MQTT (adaptar temporalmente a formato viejo)
-        // NOTA: mqtt_adapter espera ambient_sensor_data_t, adaptar hasta migrar MQTT
-        ambient_sensor_data_t mqtt_data = {
-            .ambient_temperature = reading.ambient.temperature,
-            .ambient_humidity = reading.ambient.humidity
-        };
-
-        ret = mqtt_adapter_publish_sensor_data(&mqtt_data);
+        // 4. PUBLICAR VÍA MQTT usando nuevo componente mqtt_client
+        // mqtt_client acepta sensor_reading_t directamente (incluye ambient + soil data)
+        ret = mqtt_client_publish_sensor_data(&reading);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "MQTT publish failed: %s", esp_err_to_name(ret));
             continue;
@@ -113,59 +103,61 @@ static void sensor_publishing_task(void *pvParameters)
 static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
 {
-    if (event_base == WIFI_ADAPTER_EVENTS) {
+    if (event_base == WIFI_MANAGER_EVENTS) {
         switch (event_id) {
-            case WIFI_ADAPTER_EVENT_INIT_COMPLETE:
-                ESP_LOGI(TAG, "WiFi adapter inicializado");
+            case WIFI_MANAGER_EVENT_INIT_COMPLETE:
+                ESP_LOGI(TAG, "WiFi manager inicializado");
                 break;
-                
-            case WIFI_ADAPTER_EVENT_PROVISIONING_STARTED:
+
+            case WIFI_MANAGER_EVENT_PROVISIONING_STARTED:
                 ESP_LOGI(TAG, "Modo de aprovisionamiento WiFi iniciado");
                 ESP_LOGI(TAG, "Conectar a red 'Liwaisi-Config' para configurar WiFi");
                 break;
-                
-            case WIFI_ADAPTER_EVENT_PROVISIONING_COMPLETED:
+
+            case WIFI_MANAGER_EVENT_PROVISIONING_COMPLETED:
                 ESP_LOGI(TAG, "Aprovisionamiento WiFi completado");
                 break;
 
-            case WIFI_ADAPTER_EVENT_CONNECTED:
+            case WIFI_MANAGER_EVENT_CONNECTED:
                 ESP_LOGI(TAG, "Conexión WiFi establecida");
                 break;
 
-            case WIFI_ADAPTER_EVENT_IP_OBTAINED: {
+            case WIFI_MANAGER_EVENT_IP_OBTAINED: {
                 esp_ip4_addr_t ip;
-                if (wifi_adapter_get_ip(&ip) == ESP_OK) {
+                if (wifi_manager_get_ip(&ip) == ESP_OK) {
                     ESP_LOGI(TAG, "Dirección IP obtenida: " IPSTR, IP2STR(&ip));
                 }
 
-                // Initialize HTTP adapter when IP is obtained (both after provisioning and normal connections)
-                if (!s_http_adapter_initialized) {
-                    ESP_LOGI(TAG, "Inicializando adaptador HTTP tras obtener IP...");
+                // Initialize HTTP server when IP is obtained (both after provisioning and normal connections)
+                if (!s_http_server_initialized) {
+                    ESP_LOGI(TAG, "Inicializando servidor HTTP tras obtener IP...");
                     // Small delay to ensure any provisioning server is fully stopped
                     vTaskDelay(pdMS_TO_TICKS(1000));
-                    esp_err_t ret = http_adapter_init();
+
+                    // Use default HTTP server configuration
+                    esp_err_t ret = http_server_init(NULL);  // NULL = use defaults
                     if (ret == ESP_OK) {
-                        s_http_adapter_initialized = true;
-                        ESP_LOGI(TAG, "Adaptador HTTP inicializado correctamente en IP: " IPSTR, IP2STR(&ip));
+                        s_http_server_initialized = true;
+                        ESP_LOGI(TAG, "Servidor HTTP inicializado correctamente en IP: " IPSTR, IP2STR(&ip));
                     } else {
-                        ESP_LOGE(TAG, "Error al inicializar adaptador HTTP: %s", esp_err_to_name(ret));
+                        ESP_LOGE(TAG, "Error al inicializar servidor HTTP: %s", esp_err_to_name(ret));
                     }
                 }
                 break;
             }
-            
-            case WIFI_ADAPTER_EVENT_DISCONNECTED:
+
+            case WIFI_MANAGER_EVENT_DISCONNECTED:
                 ESP_LOGW(TAG, "Conexión WiFi perdida - reintentando...");
                 break;
-                
-            case WIFI_ADAPTER_EVENT_RESET_REQUESTED:
+
+            case WIFI_MANAGER_EVENT_RESET_REQUESTED:
                 ESP_LOGW(TAG, "Patrón de reinicio detectado - iniciando aprovisionamiento");
                 break;
-                
-            case WIFI_ADAPTER_EVENT_CONNECTION_FAILED:
+
+            case WIFI_MANAGER_EVENT_CONNECTION_FAILED:
                 ESP_LOGE(TAG, "Fallo en conexión WiFi");
                 break;
-                
+
             default:
                 break;
         }
@@ -174,16 +166,16 @@ static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
 
 /**
  * @brief Punto de entrada principal de la aplicación
- * 
- * Inicializa todos los componentes del sistema siguiendo los principios
- * de arquitectura hexagonal, donde el dominio es independiente de la
- * infraestructura.
+ *
+ * Inicializa todos los componentes del sistema siguiendo arquitectura component-based.
+ * Componentes migrados de hexagonal a component-based architecture.
  */
 void app_main(void)
 {
     ESP_LOGI(TAG, "==============================================");
     ESP_LOGI(TAG, "Liwaisi Tech - https://liwaisi.tech");
-    ESP_LOGI(TAG, "Iniciando Sistema de Riego Inteligente v1.0.0");
+    ESP_LOGI(TAG, "Sistema de Riego Inteligente v2.0.0");
+    ESP_LOGI(TAG, "Component-Based Architecture");
     ESP_LOGI(TAG, "Compilado: %s %s", __DATE__, __TIME__);
     ESP_LOGI(TAG, "==============================================");
 
@@ -229,46 +221,40 @@ void app_main(void)
     ESP_LOGI(TAG, "Inicializando servicio de configuración del dispositivo...");
     ESP_ERROR_CHECK(device_config_init());
 
-    // 2. Inicialización de la capa de infraestructura
-    ESP_LOGI(TAG, "Inicializando capa de Infraestructura...");
-    
-    // Registrar manejador de eventos WiFi
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_ADAPTER_EVENTS, ESP_EVENT_ANY_ID, &main_wifi_event_handler, NULL));
-    
-    // Inicializar y arrancar adaptador WiFi
-    ESP_LOGI(TAG, "Inicializando adaptador WiFi...");
-    ESP_ERROR_CHECK(wifi_adapter_init());
-    ESP_ERROR_CHECK(wifi_adapter_start());
-    
-    // Mostrar estado del dispositivo
-    wifi_adapter_status_t wifi_status;
-    if (wifi_adapter_get_status(&wifi_status) == ESP_OK) {
-        ESP_LOGI(TAG, "Estado WiFi: %s", 
-                 wifi_status.provisioned ? "Aprovisionado" : "No aprovisionado");
-        
-        uint8_t mac[6];
-        if (wifi_adapter_get_mac(mac) == ESP_OK) {
-            ESP_LOGI(TAG, "Dirección MAC: %02x:%02x:%02x:%02x:%02x:%02x",
-                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        }
-    }
-    
-    // DO NOT initialize HTTP adapter here - it conflicts with provisioning server
-    // HTTP adapter will be initialized after WiFi connection is established
-    ESP_LOGI(TAG, "HTTP adapter initialization deferred until WiFi connection");
-    
-    // Inicializar adaptador MQTT después de HTTP
-    ESP_LOGI(TAG, "Inicializando adaptador MQTT...");
-    ESP_ERROR_CHECK(mqtt_adapter_init());
+    // 2. Inicialización de componentes de conectividad
+    ESP_LOGI(TAG, "Inicializando componentes de conectividad...");
 
-    // 3. Inicialización de la capa de aplicación (Use Cases)
-    ESP_LOGI(TAG, "Inicializando capa de Aplicación...");
-    
-    // TODO: Implementar inicialización de use cases
-    // device_registration_init();
-    // read_sensors_init();
-    // control_irrigation_init();
-    
+    // Registrar manejador de eventos WiFi
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_MANAGER_EVENTS, ESP_EVENT_ANY_ID, &main_wifi_event_handler, NULL));
+
+    // Inicializar y arrancar WiFi manager
+    ESP_LOGI(TAG, "Inicializando WiFi manager...");
+    ESP_ERROR_CHECK(wifi_manager_init());
+    ESP_ERROR_CHECK(wifi_manager_start());
+
+    // Mostrar estado del dispositivo
+    wifi_manager_status_t wifi_status;
+    if (wifi_manager_get_status(&wifi_status) == ESP_OK) {
+        ESP_LOGI(TAG, "Estado WiFi: %s",
+                 wifi_status.provisioned ? "Aprovisionado" : "No aprovisionado");
+
+        ESP_LOGI(TAG, "Dirección MAC: %02x:%02x:%02x:%02x:%02x:%02x",
+                 wifi_status.mac_address[0], wifi_status.mac_address[1],
+                 wifi_status.mac_address[2], wifi_status.mac_address[3],
+                 wifi_status.mac_address[4], wifi_status.mac_address[5]);
+    }
+
+    // DO NOT initialize HTTP server here - it conflicts with provisioning server
+    // HTTP server will be initialized after WiFi connection is established
+    ESP_LOGI(TAG, "HTTP server initialization deferred until WiFi connection");
+
+    // Inicializar cliente MQTT
+    ESP_LOGI(TAG, "Inicializando cliente MQTT...");
+    ESP_ERROR_CHECK(mqtt_client_init());
+
+    // 3. Creación de tareas de aplicación
+    ESP_LOGI(TAG, "Creando tareas de aplicación...");
+
     // Crear tarea de publicación de sensores
     ESP_LOGI(TAG, "Creando tarea de publicación de sensores...");
     BaseType_t task_ret = xTaskCreatePinnedToCore(

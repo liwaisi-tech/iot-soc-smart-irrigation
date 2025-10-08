@@ -1,5 +1,5 @@
 /**
- * @file mqtt_client.h
+ * @file mqtt_client_manager.h
  * @brief MQTT Client Component - Communication and Data Publishing
  *
  * Simple MQTT client for sensor data publishing and irrigation commands.
@@ -19,12 +19,11 @@
  * @version 2.0.0 - Component-Based Architecture
  */
 
-#ifndef MQTT_CLIENT_H
-#define MQTT_CLIENT_H
+#ifndef MQTT_CLIENT_MANAGER_H
+#define MQTT_CLIENT_MANAGER_H
 
 #include "esp_err.h"
 #include "esp_event.h"
-#include "mqtt_client.h"
 #include "common_types.h"
 #include <stdbool.h>
 
@@ -309,4 +308,4 @@ typedef enum {
 }
 #endif
 
-#endif // MQTT_CLIENT_H
+#endif // MQTT_CLIENT_MANAGER_H

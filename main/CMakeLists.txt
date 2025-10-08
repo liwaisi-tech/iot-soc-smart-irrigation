@@ -2,13 +2,21 @@ idf_component_register(
     SRCS "iot-soc-smart-irrigation.c"
     INCLUDE_DIRS "."
     REQUIRES
-        infrastructure       # Arquitectura hexagonal (temporal)
-        sensor_reader       # NUEVO: Componente unificado de sensores
-        device_config       # NUEVO: Componente de configuración (migrado)
+        # Component-Based Architecture (MIGRATED)
+        wifi_manager        # Migrated from wifi_adapter
+        http_server         # Migrated from http_adapter
+        mqtt_client         # Migrated from mqtt_adapter
+        sensor_reader       # Migrated component - unified sensor interface
+        device_config       # Migrated component - configuration management
+
+        # Shared resources (still needed)
+        infrastructure      # For shared_resource_manager only
+
+        # ESP-IDF components
         nvs_flash
         esp_event
         esp_system
-        esp_netif           # Para tipos de red en sensor_reader
+        esp_netif
         freertos
         esp_http_server
 )

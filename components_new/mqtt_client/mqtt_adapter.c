@@ -1,5 +1,5 @@
 /**
- * @file mqtt_client.c
+ * @file mqtt_adapter.c
  * @brief MQTT Client Component Implementation - Component-Based Architecture
  *
  * Consolidates MQTT functionality from hexagonal architecture:
@@ -14,21 +14,22 @@
  * @version 2.0.0
  */
 
-#include "mqtt_client.h"
-#include "sensor_reader.h"
-#include "device_config.h"
-#include "wifi_manager.h"
-
-// ESP-IDF includes
+// ESP-IDF includes (MUST be first to define esp_mqtt_event_t)
+#include "mqtt_client.h"  // ESP-IDF MQTT client header from ESP-IDF framework
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_event.h"
 #include "esp_timer.h"
 #include "esp_system.h"
-#include "mqtt_client.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+// Component headers (after ESP-IDF to avoid conflicts)
+#include "mqtt_client_manager.h"  // Local component header
+#include "sensor_reader.h"
+#include "device_config.h"
+#include "wifi_manager.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -109,7 +110,7 @@ static void mqtt_reconnect_timer_callback(void* arg);
 static esp_err_t mqtt_generate_client_id(char* client_id, size_t size);
 static esp_err_t mqtt_configure_client(void);
 static esp_err_t mqtt_start_reconnect_timer(uint32_t delay_ms);
-static void mqtt_handle_irrigation_command(esp_mqtt_event_handle_t event);
+static void mqtt_handle_irrigation_command(esp_mqtt_event_t* event);
 static esp_err_t mqtt_build_device_json(cJSON** json_out);
 static esp_err_t mqtt_build_sensor_data_json(const sensor_reading_t* reading,
                                              cJSON** json_out);
@@ -231,7 +232,7 @@ esp_err_t mqtt_client_init(void)
     }
 
     // Update status
-    s_mqtt_ctx.state = MQTT_STATE_INITIALIZED;
+    s_mqtt_ctx.state = MQTT_STATE_UNINITIALIZED;  // Initialized but not connected yet
     s_mqtt_ctx.initialized = true;
     strncpy(s_mqtt_ctx.status.client_id, s_mqtt_ctx.config.client_id,
             sizeof(s_mqtt_ctx.status.client_id) - 1);
@@ -434,7 +435,7 @@ static esp_err_t mqtt_start_reconnect_timer(uint32_t delay_ms)
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                                int32_t event_id, void *event_data)
 {
-    esp_mqtt_event_handle_t event = event_data;
+    esp_mqtt_event_t* event = (esp_mqtt_event_t*)event_data;
 
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
@@ -873,7 +874,7 @@ esp_err_t mqtt_client_register_command_callback(mqtt_irrigation_command_cb_t cal
  * Parses JSON payload: {"command": "start|stop|emergency_stop", "duration_minutes": 15}
  * Calls registered callback if command is valid.
  */
-static void mqtt_handle_irrigation_command(esp_mqtt_event_handle_t event)
+static void mqtt_handle_irrigation_command(esp_mqtt_event_t* event)
 {
     // Verify topic matches irrigation/control/<MAC>
     if (event->topic_len < 20 || strncmp(event->topic, MQTT_TOPIC_CONTROL_PREFIX,

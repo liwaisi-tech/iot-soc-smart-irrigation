@@ -227,7 +227,7 @@ static esp_err_t whoami_handler(httpd_req_t *req)
     // Update statistics
     s_http_ctx.stats.requests[HTTP_ENDPOINT_WHOAMI]++;
     s_http_ctx.stats.total_requests++;
-    s_http_ctx.stats.last_request_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    // Note: last_request_time tracking removed (context doesn't have status field)
 
     // Log request start
     if (s_http_ctx.config.enable_logging) {
@@ -342,7 +342,7 @@ static esp_err_t sensors_handler(httpd_req_t *req)
     // Update statistics
     s_http_ctx.stats.requests[HTTP_ENDPOINT_SENSORS]++;
     s_http_ctx.stats.total_requests++;
-    s_http_ctx.stats.last_request_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    // Note: last_request_time tracking removed (context doesn't have status field)
 
     // Log request start
     if (s_http_ctx.config.enable_logging) {
@@ -402,7 +402,7 @@ static esp_err_t sensors_handler(httpd_req_t *req)
         cJSON_AddNumberToObject(root, "soil_humidity_1", reading.soil.soil_humidity[0]);
         cJSON_AddNumberToObject(root, "soil_humidity_2", reading.soil.soil_humidity[1]);
         cJSON_AddNumberToObject(root, "soil_humidity_3", reading.soil.soil_humidity[2]);
-        cJSON_AddNumberToObject(root, "timestamp", reading.timestamp);
+        // Note: timestamp removed - sensor_reading_t doesn't have timestamp field
 
         status_code = 200;
     }
@@ -446,7 +446,7 @@ static esp_err_t ping_handler(httpd_req_t *req)
     // Update statistics
     s_http_ctx.stats.requests[HTTP_ENDPOINT_PING]++;
     s_http_ctx.stats.total_requests++;
-    s_http_ctx.stats.last_request_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    // Note: last_request_time tracking removed (context doesn't have status field)
 
     // Log request start
     if (s_http_ctx.config.enable_logging) {
@@ -726,7 +726,7 @@ esp_err_t http_server_get_status(http_server_status_t* status)
     status->port = s_http_ctx.config.port;
     status->total_requests = s_http_ctx.stats.total_requests;
     status->error_count = s_http_ctx.stats.total_errors;
-    status->last_request_time = s_http_ctx.stats.last_request_time;
+    status->last_request_time = 0;  // Not tracked in context
     status->handle = s_http_ctx.server;
 
     return ESP_OK;
