@@ -30,12 +30,33 @@
 **Implementation**: `components_new/mqtt_client/`, `components_new/http_server/`, `components_new/device_config/`
 **Migration Status**: ✅ Todos los componentes migrados y funcionando
 
-### **Phase 4: Irrigation Control** ⏳ **READY TO START**
-- ⏳ MQTT command subscription **PENDIENTE**
-- ⏳ Valve control system **PENDIENTE**
-- ⏳ Offline automatic irrigation logic **PENDIENTE**
+### **Phase 4: Architectural Validation & Compliance** 🔄 **IN PROGRESS**
+**Status**: Started 2025-10-09
+**Objective**: Garantizar que TODOS los componentes cumplan 100% con los 5 principios Component-Based
 
-**✅ DESBLOQUEADO**: Migración completada - listo para nuevas features
+**Detailed Plan**: Ver [CLAUDE_PHASE4_PLAN.md](CLAUDE_PHASE4_PLAN.md)
+
+**Tasks**:
+- 🔄 Validar cada componente contra 5 principios Component-Based
+- ⏳ Completar thread-safety en wifi_manager (BLOQUEANTE)
+- ⏳ Identificar violaciones arquitecturales y tech debt
+- ⏳ Implementar correcciones críticas
+- ⏳ Documentar decisiones arquitecturales
+
+**Critical Path**:
+- 🔴 **wifi_manager thread-safety INCOMPLETE** (BLOCKING for Phase 5)
+  - Event handlers NOT protected (4 handlers)
+  - Init/deinit functions NOT protected (8 functions)
+  - Estimate: 2-4 hours
+
+**Preliminary Findings**:
+- sensor_reader: Calibration SRC violation?
+- device_config: 30+ functions - MIS violation?
+- wifi_manager: SRC/MIS/DD violations + Thread-safety INCOMPLETE
+- mqtt_client: JSON serialization SRC violation?
+- http_server: Likely compliant
+
+**✅ PRÓXIMO PASO**: Completar thread-safety wifi_manager antes de continuar
 
 ### **Phase 5: Optimization** ⏳ **PENDING**
 - ⏳ Memory management & sleep modes
@@ -52,53 +73,122 @@
 - ✅ **100% Component-Based** - arquitectura hexagonal eliminada del main.c
 - ✅ **Thread-Safety** vía mecanismos internos de cada componente
 
-### **✅ VALIDACIÓN ARQUITECTURAL COMPLETADA**
+### 🔄 **PHASE 4: VALIDACIÓN ARQUITECTURAL EN PROGRESO**
 
-**Fecha**: 2025-10-09
-**Resultado**: Todos los componentes cumplen con Principios Component-Based
+**Fecha de Inicio**: 2025-10-09
+**Status**: 🔄 IN PROGRESS
+**Objetivo**: Validar TODOS los componentes contra 5 principios Component-Based
 
-#### **Principios Validados**:
+**Plan Completo**: Ver [CLAUDE_PHASE4_PLAN.md](CLAUDE_PHASE4_PLAN.md)
 
-1. ✅ **Single Responsibility Component (SRC)**
-   - ✅ `sensor_reader`: Solo lectura de sensores (DHT22 + ADC)
-   - ✅ `device_config`: Solo gestión de configuración NVS
-   - ✅ `wifi_manager`: Solo conectividad WiFi
-   - ✅ `mqtt_client`: Solo comunicación MQTT
-   - ✅ `http_server`: Solo endpoints HTTP
+---
 
-2. ✅ **Minimal Interface Segregation (MIS)**
-   - ✅ APIs específicas y mínimas por componente
-   - ✅ No hay "god objects" - cada componente expone solo lo necesario
+#### **Estado de Análisis por Componente**:
 
-3. ✅ **Direct Dependencies (DD)**
-   - ✅ Dependencias directas componente-a-componente
-   - ✅ `shared_resource_manager` global **ELIMINADO** (violaba DD)
-   - ✅ Cada componente maneja su propia sincronización
+| Component | SRC | MIS | DD | Memory-First | Task-Oriented | Status |
+|-----------|-----|-----|----|--------------|--------------| -------|
+| sensor_reader | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | Pending analysis |
+| device_config | ⏳ | ⚠️ | ⏳ | ✅ | ⏳ | **30+ functions - MIS?** |
+| wifi_manager | ❌ | ⚠️ | ⚠️ | 🔴 | ⏳ | **CRITICAL - Thread-safety INCOMPLETE** |
+| mqtt_client | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | Pending analysis |
+| http_server | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | Pending analysis |
 
-4. ✅ **Memory-First Design**
-   - ✅ Arrays estáticos en lugar de malloc
-   - ✅ Stack allocation para datos temporales
-   - ✅ device_config: Mutex interno estático
-   - ✅ sensor_reader: portMUX_TYPE interno
+**Leyenda**:
+- ✅ Compliant
+- ⏳ Pending analysis
+- ⚠️ Potential violation (requires decision)
+- ❌ Known violation (documented)
+- 🔴 Critical issue (BLOCKING)
 
-5. ✅ **Task-Oriented Architecture**
-   - ✅ `sensor_publishing_task`: 4KB stack, prioridad 3
-   - ✅ Tareas con responsabilidad específica
-   - ✅ Stack sizes optimizados por componente
+---
 
-#### **Decisiones Arquitecturales Tomadas**:
+#### **Hallazgos Preliminares (Analysis in Progress)**:
+
+1. **sensor_reader** (11 funciones públicas)
+   - ⏳ **SRC**: Calibration functions - ¿violation o cohesivo?
+   - ⏳ **MIS**: 11 funciones - validar si es minimal
+   - ✅ **Memory-First**: portMUX_TYPE ya implementado en dht.c
+
+2. **device_config** (30+ funciones públicas) ⚠️ **CRÍTICO**
+   - ⏳ **SRC**: 5 categories (device/WiFi/MQTT/irrigation/sensor) - ¿1 o 5 responsibilities?
+   - ⚠️ **MIS POTENTIAL VIOLATION**: 30+ funciones es el conteo MÁS ALTO
+   - **Decision Required**: ¿Keep unified o split en sub-components?
+   - ✅ **Memory-First**: Mutex interno `s_config_mutex` confirmado
+
+3. **wifi_manager** (15 funciones públicas) 🔴 **BLOQUEANTE**
+   - ❌ **SRC VIOLATION CONFIRMED**: 3 responsibilities
+     - WiFi connection management (core)
+     - Web-based provisioning (HTTP server + 4KB HTML)
+     - Boot counter (factory reset pattern)
+   - ⚠️ **MIS**: 15 functions (8 core + 7 provisioning/boot)
+   - ⚠️ **DD VIOLATION**: Dependencies on `esp_http_server` (~17KB) only for provisioning
+   - 🔴 **Memory-First CRITICAL - INCOMPLETE**:
+     - ✅ Spinlocks added (3): `s_manager_status_spinlock`, `s_conn_manager_spinlock`, `s_prov_manager_spinlock`
+     - ✅ API public read functions protected (7)
+     - 🔴 **Event handlers NOT protected** (4 handlers modify shared state):
+       - `connection_event_handler()` (~line 1217)
+       - `wifi_manager_provisioning_event_handler()` (~line 1262)
+       - `wifi_manager_connection_event_handler()` (~line 271)
+       - Internal provisioning handler (~line 484)
+     - 🔴 **Init/deinit/management NOT protected** (8 functions):
+       - `wifi_manager_init()`, `wifi_manager_start()`, `wifi_manager_stop()`, `wifi_manager_deinit()`
+       - `wifi_manager_check_and_connect()`, `wifi_manager_force_provisioning()`
+       - `wifi_manager_reset_credentials()`, `wifi_manager_clear_all_credentials()`
+   - **REQUIRED**: Complete thread-safety before Phase 5
+   - **Estimate**: 2-4 hours
+
+4. **mqtt_client** (10 funciones públicas)
+   - ⏳ **SRC**: JSON serialization incluido - ¿violation?
+   - ⏳ **Memory-First**: "task-based serialization" mencionado - validar thread-safety
+
+5. **http_server** (7 funciones públicas)
+   - ⏳ **Expected**: Likely compliant (minimal API, clear responsibility)
+   - ⏳ **Memory-First**: ESP-IDF httpd thread-safe nativo - validar
+
+---
+
+#### **Decisiones Arquitecturales Pendientes**:
+
+1. **[ ] Decision 1: wifi_manager thread-safety (BLOCKING)**
+   - **MUST COMPLETE**: Protect event handlers + init/deinit functions
+   - **Estimate**: 2-4 hours
+   - **Rationale**: Required for Phase 5 (irrigation_controller depends on wifi_manager)
+   - **Status**: ⏳ Pending implementation
+
+2. **[ ] Decision 2: wifi_manager refactoring scope**
+   - **Option A (RECOMMENDED)**: Defer refactoring to Phase 6
+     - Pros: Faster to Phase 5, system functional and thread-safe
+     - Cons: SRC/MIS/DD violations persist temporarily
+   - **Option B**: Refactor NOW into 3 components
+     - Pros: 100% clean architecture
+     - Cons: 1-2 days delay, blocks irrigation features
+   - **Status**: ⏳ Pending decision
+
+3. **[ ] Decision 3: device_config MIS validation**
+   - 30+ functions - Keep unified or split?
+   - **Criteria**: Are all functions cohesive (same domain)?
+   - **Status**: ⏳ Pending analysis
+
+4. **[ ] Decision 4: Component-specific validations**
+   - sensor_reader: Calibration within component or separate?
+   - mqtt_client: JSON serialization cohesive or separate?
+   - **Status**: ⏳ Pending analysis
+
+---
+
+#### **Decisiones Arquitecturales Tomadas (Pre-Phase 4)**:
 
 1. ✅ **Eliminación de `shared_resource_manager`**
    - **Razón**: Violaba principios SRC, MIS y DD
    - **Reemplazo**: Thread-safety interno en cada componente
    - **Resultado**: ~6KB Flash ahorrados + mejor encapsulación
 
-2. ✅ **Thread-Safety por Componente**
-   - `device_config`: Mutex interno (`s_config_mutex`)
-   - `sensor_reader`: portMUX_TYPE para critical sections de timing
-   - `mqtt_client`: Task-based serialization (no concurrencia)
-   - `http_server`: ESP-IDF httpd thread-safe nativo
-   - `wifi_manager`: ESP-IDF WiFi driver thread-safe nativo
+2. ⏳ **Thread-Safety por Componente** (Partial - Phase 4 completing)
+   - `device_config`: ✅ Mutex interno (`s_config_mutex`)
+   - `sensor_reader`: ✅ portMUX_TYPE para critical sections
+   - `mqtt_client`: ⏳ Task-based serialization (pending validation)
+   - `http_server`: ⏳ ESP-IDF httpd thread-safe nativo (pending validation)
+   - `wifi_manager`: 🔴 **INCOMPLETE** (requires completion in Phase 4)
 
 ---
 
@@ -108,7 +198,7 @@
 |------------|------------------|------------|--------|
 | **sensor_reader** | ✅ COMPLETADO | 2.8 KB | components/infrastructure/drivers/dht_sensor |
 | **device_config** | ✅ COMPLETADO | 0.8 KB | components/domain/services/device_config_service |
-| **wifi_manager** | ✅ COMPLETADO | 11.6 KB | components/infrastructure/adapters/wifi_adapter |
+| **wifi_manager** | ✅ COMPLETADO + MEJORADO | 11.6 KB | components/infrastructure/adapters/wifi_adapter |
 | **mqtt_client** | ✅ COMPLETADO | 3.9 KB | components/infrastructure/adapters/mqtt_adapter |
 | **http_server** | ✅ COMPLETADO | 2.3 KB | components/infrastructure/adapters/http_adapter |
 | **main.c** | ✅ COMPLETADO | 2.0 KB | 100% Component-Based |
@@ -242,7 +332,51 @@ esp_err_t sensor_reader_get_soil_calibration(uint8_t sensor_index, uint16_t* dry
 
 **Estado**: Funciones implementadas pero documentadas como "NO USADAS - Fase 2"
 
-### **2. device_config (✅ COMPLETADO)**
+### **2. wifi_manager (✅ COMPLETADO + MEJORADO 2025-10-09)**
+
+**Ubicación**: `components_new/wifi_manager/`
+
+**Estado**: Implementado, compilando correctamente, thread-safety MEJORADO
+
+**Mejoras de Thread-Safety (2025-10-09)**:
+
+**Problema identificado**: Estado compartido NO protegido contra acceso concurrente
+- `s_manager_status` - Accedido por event handlers + API pública
+- `s_conn_manager` - Modificado por event handlers WiFi
+- `s_prov_manager` - Modificado por HTTP handlers provisioning
+
+**Solución implementada** (Opción B: Mejora Incremental):
+```c
+// Spinlocks agregados (líneas 79, 114, 158)
+static portMUX_TYPE s_conn_manager_spinlock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_prov_manager_spinlock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_manager_status_spinlock = portMUX_INITIALIZER_UNLOCKED;
+```
+
+**Funciones públicas protegidas** (lecturas):
+- ✅ `wifi_manager_get_status()` - Protected with spinlock
+- ✅ `wifi_manager_is_provisioned()` - Protected with spinlock
+- ✅ `wifi_manager_is_connected()` - Protected with spinlock
+- ✅ `wifi_manager_get_ip()` - Protected with spinlock
+- ✅ `wifi_manager_get_mac()` - Protected with spinlock
+- ✅ `wifi_manager_get_ssid()` - Protected with spinlock
+- ✅ `wifi_manager_get_state()` - Protected with spinlock
+
+**Resultado**:
+- ✅ Eliminadas race conditions entre event handlers y API calls
+- ✅ Componente SAFE para acceso concurrente en Phase 4
+- ⏳ Event handlers (escrituras) pendientes para Phase 5
+
+**Trabajo pendiente** (Phase 5):
+- Proteger event handlers (líneas 1217, 1262, 271, 484)
+- Proteger init/start/stop/deinit (líneas 1305, 1341, 1355, 1574)
+- Refactoring arquitectural: separar en 3 componentes (wifi_manager, wifi_provisioning, boot_counter)
+
+**Technical Debt Documentado**: Ver CLAUDE.md sección "Technical Debt (Phase 5)"
+
+---
+
+### **3. device_config (✅ COMPLETADO)**
 
 **Ubicación**: `components_new/device_config/`
 

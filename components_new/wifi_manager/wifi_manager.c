@@ -76,6 +76,7 @@ typedef struct {
 } wifi_connection_manager_t;
 
 static wifi_connection_manager_t s_conn_manager = {0};
+static portMUX_TYPE s_conn_manager_spinlock = portMUX_INITIALIZER_UNLOCKED;
 static EventGroupHandle_t s_wifi_event_group = NULL;
 static esp_netif_t *s_sta_netif = NULL;
 
@@ -110,6 +111,7 @@ typedef struct {
 } wifi_prov_manager_t;
 
 static wifi_prov_manager_t s_prov_manager = {0};
+static portMUX_TYPE s_prov_manager_spinlock = portMUX_INITIALIZER_UNLOCKED;
 static httpd_handle_t s_server = NULL;
 static esp_netif_t *s_ap_netif = NULL;
 static wifi_config_t s_received_wifi_config = {0};
@@ -153,6 +155,7 @@ ESP_EVENT_DEFINE_BASE(WIFI_MANAGER_PROV_EVENTS);
 ESP_EVENT_DEFINE_BASE(WIFI_MANAGER_CONNECTION_EVENTS);
 
 static wifi_manager_status_t s_manager_status = {0};
+static portMUX_TYPE s_manager_status_spinlock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_manager_initialized = false;
 
 /* Main event handlers */
@@ -273,14 +276,19 @@ static void connection_event_handler(void* arg, esp_event_base_t event_base,
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         ESP_LOGD(TAG, "WiFi station started");
+        portENTER_CRITICAL(&s_conn_manager_spinlock);
         s_conn_manager.state = WIFI_CONNECTION_STATE_CONNECTING;
+        portEXIT_CRITICAL(&s_conn_manager_spinlock);
         esp_wifi_connect();
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t* disconnected = (wifi_event_sta_disconnected_t*) event_data;
+
+        portENTER_CRITICAL(&s_conn_manager_spinlock);
         s_conn_manager.state = WIFI_CONNECTION_STATE_DISCONNECTED;
         s_conn_manager.connected = false;
         s_conn_manager.has_ip = false;
+        portEXIT_CRITICAL(&s_conn_manager_spinlock);
 
         ESP_LOGW(TAG, "WiFi disconnected - reason: %d, SSID: %s", disconnected->reason, disconnected->ssid);
 
@@ -290,25 +298,38 @@ static void connection_event_handler(void* arg, esp_event_base_t event_base,
             disconnected->reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
             disconnected->reason == WIFI_REASON_HANDSHAKE_TIMEOUT) {
             ESP_LOGE(TAG, "WiFi authentication failed - incorrect password");
+            portENTER_CRITICAL(&s_conn_manager_spinlock);
             s_conn_manager.state = WIFI_CONNECTION_STATE_FAILED;
+            portEXIT_CRITICAL(&s_conn_manager_spinlock);
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
             esp_event_post(WIFI_MANAGER_CONNECTION_EVENTS, WIFI_CONNECTION_EVENT_AUTH_FAILED, &disconnected->reason, sizeof(uint8_t), portMAX_DELAY);
             return;
         } else if (disconnected->reason == WIFI_REASON_NO_AP_FOUND) {
             ESP_LOGE(TAG, "WiFi network not found - check SSID");
+            portENTER_CRITICAL(&s_conn_manager_spinlock);
             s_conn_manager.state = WIFI_CONNECTION_STATE_FAILED;
+            portEXIT_CRITICAL(&s_conn_manager_spinlock);
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
             esp_event_post(WIFI_MANAGER_CONNECTION_EVENTS, WIFI_CONNECTION_EVENT_NETWORK_NOT_FOUND, &disconnected->reason, sizeof(uint8_t), portMAX_DELAY);
             return;
         }
 
-        if (s_conn_manager.retry_count < s_conn_manager.max_retries) {
+        portENTER_CRITICAL(&s_conn_manager_spinlock);
+        int retry_count = s_conn_manager.retry_count;
+        int max_retries = s_conn_manager.max_retries;
+        portEXIT_CRITICAL(&s_conn_manager_spinlock);
+
+        if (retry_count < max_retries) {
             esp_wifi_connect();
+            portENTER_CRITICAL(&s_conn_manager_spinlock);
             s_conn_manager.retry_count++;
-            ESP_LOGD(TAG, "Retry connection (%d/%d)", s_conn_manager.retry_count, s_conn_manager.max_retries);
+            portEXIT_CRITICAL(&s_conn_manager_spinlock);
+            ESP_LOGD(TAG, "Retry connection (%d/%d)", retry_count + 1, max_retries);
         } else {
-            ESP_LOGE(TAG, "WiFi connection failed after %d retries", s_conn_manager.max_retries);
+            ESP_LOGE(TAG, "WiFi connection failed after %d retries", max_retries);
+            portENTER_CRITICAL(&s_conn_manager_spinlock);
             s_conn_manager.state = WIFI_CONNECTION_STATE_FAILED;
+            portEXIT_CRITICAL(&s_conn_manager_spinlock);
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
             esp_event_post(WIFI_MANAGER_CONNECTION_EVENTS, WIFI_CONNECTION_EVENT_RETRY_EXHAUSTED, NULL, 0, portMAX_DELAY);
         }
@@ -317,14 +338,20 @@ static void connection_event_handler(void* arg, esp_event_base_t event_base,
 
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+
+        portENTER_CRITICAL(&s_conn_manager_spinlock);
         ESP_LOGD(TAG, "Connected to WiFi network: '%s'", s_conn_manager.ssid);
+        portEXIT_CRITICAL(&s_conn_manager_spinlock);
+
         ESP_LOGD(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
 
+        portENTER_CRITICAL(&s_conn_manager_spinlock);
         s_conn_manager.state = WIFI_CONNECTION_STATE_CONNECTED;
         s_conn_manager.connected = true;
         s_conn_manager.has_ip = true;
         s_conn_manager.retry_count = 0;
         s_conn_manager.ip_addr = event->ip_info.ip;
+        portEXIT_CRITICAL(&s_conn_manager_spinlock);
 
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
 
@@ -1221,7 +1248,9 @@ static void wifi_manager_provisioning_event_handler(void* arg, esp_event_base_t 
         switch (event_id) {
             case WIFI_PROV_EVENT_STARTED:
                 ESP_LOGD(TAG, "WiFi provisioning started");
+                portENTER_CRITICAL(&s_manager_status_spinlock);
                 s_manager_status.state = WIFI_MANAGER_STATE_PROVISIONING;
+                portEXIT_CRITICAL(&s_manager_status_spinlock);
                 esp_event_post(WIFI_MANAGER_EVENTS, WIFI_MANAGER_EVENT_PROVISIONING_STARTED, NULL, 0, portMAX_DELAY);
                 break;
 
@@ -1231,13 +1260,17 @@ static void wifi_manager_provisioning_event_handler(void* arg, esp_event_base_t 
 
             case WIFI_PROV_EVENT_COMPLETED:
                 ESP_LOGD(TAG, "WiFi provisioning completed");
+                portENTER_CRITICAL(&s_manager_status_spinlock);
                 s_manager_status.provisioned = true;
                 s_manager_status.state = WIFI_MANAGER_STATE_CONNECTING;
+                portEXIT_CRITICAL(&s_manager_status_spinlock);
 
                 wifi_config_t config;
                 if (prov_manager_get_config(&config) == ESP_OK) {
+                    portENTER_CRITICAL(&s_manager_status_spinlock);
                     strncpy(s_manager_status.ssid, (char *)config.sta.ssid, sizeof(s_manager_status.ssid) - 1);
                     s_manager_status.ssid[sizeof(s_manager_status.ssid) - 1] = '\0';
+                    portEXIT_CRITICAL(&s_manager_status_spinlock);
 
                     prov_manager_deinit();
 
@@ -1250,7 +1283,9 @@ static void wifi_manager_provisioning_event_handler(void* arg, esp_event_base_t 
 
             case WIFI_PROV_EVENT_FAILED:
                 ESP_LOGE(TAG, "WiFi provisioning failed");
+                portENTER_CRITICAL(&s_manager_status_spinlock);
                 s_manager_status.state = WIFI_MANAGER_STATE_ERROR;
+                portEXIT_CRITICAL(&s_manager_status_spinlock);
                 break;
 
             default:
@@ -1265,34 +1300,42 @@ static void wifi_manager_connection_event_handler(void* arg, esp_event_base_t ev
     if (event_base == WIFI_MANAGER_CONNECTION_EVENTS) {
         switch (event_id) {
             case WIFI_CONNECTION_EVENT_CONNECTED:
+                portENTER_CRITICAL(&s_manager_status_spinlock);
                 ESP_LOGD(TAG, "WiFi connected successfully to: '%s'", s_manager_status.ssid);
                 s_manager_status.connected = true;
                 s_manager_status.state = WIFI_MANAGER_STATE_CONNECTED;
+                portEXIT_CRITICAL(&s_manager_status_spinlock);
                 esp_event_post(WIFI_MANAGER_EVENTS, WIFI_MANAGER_EVENT_CONNECTED, NULL, 0, portMAX_DELAY);
                 break;
 
             case WIFI_CONNECTION_EVENT_DISCONNECTED:
                 ESP_LOGD(TAG, "WiFi disconnected");
+                portENTER_CRITICAL(&s_manager_status_spinlock);
                 s_manager_status.connected = false;
                 s_manager_status.has_ip = false;
                 s_manager_status.state = WIFI_MANAGER_STATE_DISCONNECTED;
+                portEXIT_CRITICAL(&s_manager_status_spinlock);
                 esp_event_post(WIFI_MANAGER_EVENTS, WIFI_MANAGER_EVENT_DISCONNECTED, NULL, 0, portMAX_DELAY);
                 break;
 
             case WIFI_CONNECTION_EVENT_GOT_IP:
                 ESP_LOGD(TAG, "WiFi got IP address");
+                portENTER_CRITICAL(&s_manager_status_spinlock);
                 s_manager_status.has_ip = true;
                 if (event_data != NULL) {
                     esp_ip4_addr_t *ip = (esp_ip4_addr_t *)event_data;
                     s_manager_status.ip_addr = *ip;
                     ESP_LOGD(TAG, "IP address: " IPSTR, IP2STR(ip));
                 }
+                portEXIT_CRITICAL(&s_manager_status_spinlock);
                 esp_event_post(WIFI_MANAGER_EVENTS, WIFI_MANAGER_EVENT_IP_OBTAINED, event_data, sizeof(esp_ip4_addr_t), portMAX_DELAY);
                 break;
 
             case WIFI_CONNECTION_EVENT_RETRY_EXHAUSTED:
                 ESP_LOGE(TAG, "WiFi connection retry exhausted");
+                portENTER_CRITICAL(&s_manager_status_spinlock);
                 s_manager_status.state = WIFI_MANAGER_STATE_ERROR;
+                portEXIT_CRITICAL(&s_manager_status_spinlock);
                 esp_event_post(WIFI_MANAGER_EVENTS, WIFI_MANAGER_EVENT_CONNECTION_FAILED, NULL, 0, portMAX_DELAY);
                 break;
 
@@ -1311,11 +1354,13 @@ esp_err_t wifi_manager_init(void)
 
     ESP_LOGD(TAG, "Initializing WiFi manager");
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     s_manager_status.state = WIFI_MANAGER_STATE_UNINITIALIZED;
     s_manager_status.provisioned = false;
     s_manager_status.connected = false;
     s_manager_status.has_ip = false;
     memset(s_manager_status.ssid, 0, sizeof(s_manager_status.ssid));
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
 
     ESP_ERROR_CHECK(prov_manager_init());
     ESP_ERROR_CHECK(connection_manager_init());
@@ -1323,7 +1368,11 @@ esp_err_t wifi_manager_init(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_MANAGER_PROV_EVENTS, ESP_EVENT_ANY_ID, &wifi_manager_provisioning_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_MANAGER_CONNECTION_EVENTS, ESP_EVENT_ANY_ID, &wifi_manager_connection_event_handler, NULL));
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
+    portENTER_CRITICAL(&s_conn_manager_spinlock);
     memcpy(s_manager_status.mac_address, s_conn_manager.mac_address, 6);
+    portEXIT_CRITICAL(&s_conn_manager_spinlock);
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
 
     s_manager_initialized = true;
 
@@ -1364,9 +1413,11 @@ esp_err_t wifi_manager_stop(void)
     prov_manager_stop();
     connection_manager_stop();
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     s_manager_status.state = WIFI_MANAGER_STATE_UNINITIALIZED;
     s_manager_status.connected = false;
     s_manager_status.has_ip = false;
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
 
     return ESP_OK;
 }
@@ -1402,7 +1453,9 @@ esp_err_t wifi_manager_check_and_connect(void)
 
     ESP_LOGD(TAG, "Checking WiFi provisioning and connection status");
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     s_manager_status.state = WIFI_MANAGER_STATE_CHECKING_PROVISION;
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
 
     // Check for manual reset pattern
     bool should_provision = false;
@@ -1437,11 +1490,15 @@ esp_err_t wifi_manager_check_and_connect(void)
         return wifi_manager_force_provisioning();
     }
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     s_manager_status.provisioned = provisioned;
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
 
     if (provisioned) {
         ESP_LOGD(TAG, "Device has stored credentials, attempting to connect");
+        portENTER_CRITICAL(&s_manager_status_spinlock);
         s_manager_status.state = WIFI_MANAGER_STATE_CONNECTING;
+        portEXIT_CRITICAL(&s_manager_status_spinlock);
 
         wifi_config_t config;
         ret = prov_manager_get_config(&config);
@@ -1457,8 +1514,10 @@ esp_err_t wifi_manager_check_and_connect(void)
         }
 
         ESP_LOGD(TAG, "Connecting to stored WiFi network: '%s' (length: %d)", config.sta.ssid, strlen((char*)config.sta.ssid));
+        portENTER_CRITICAL(&s_manager_status_spinlock);
         strncpy(s_manager_status.ssid, (char *)config.sta.ssid, sizeof(s_manager_status.ssid) - 1);
         s_manager_status.ssid[sizeof(s_manager_status.ssid) - 1] = '\0';
+        portEXIT_CRITICAL(&s_manager_status_spinlock);
 
         return connection_manager_connect(&config);
 
@@ -1479,9 +1538,11 @@ esp_err_t wifi_manager_force_provisioning(void)
 
     connection_manager_stop();
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     s_manager_status.state = WIFI_MANAGER_STATE_PROVISIONING;
     s_manager_status.connected = false;
     s_manager_status.has_ip = false;
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
 
     return prov_manager_start();
 }
@@ -1504,11 +1565,13 @@ esp_err_t wifi_manager_reset_credentials(void)
         return ret;
     }
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     s_manager_status.provisioned = false;
     s_manager_status.connected = false;
     s_manager_status.has_ip = false;
     s_manager_status.state = WIFI_MANAGER_STATE_UNINITIALIZED;
     memset(s_manager_status.ssid, 0, sizeof(s_manager_status.ssid));
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
 
     return ESP_OK;
 }
@@ -1525,27 +1588,45 @@ esp_err_t wifi_manager_get_status(wifi_manager_status_t *status)
         return ESP_ERR_INVALID_ARG;
     }
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     *status = s_manager_status;
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
+
     return ESP_OK;
 }
 
 bool wifi_manager_is_provisioned(void)
 {
-    return s_manager_status.provisioned;
+    bool provisioned;
+    portENTER_CRITICAL(&s_manager_status_spinlock);
+    provisioned = s_manager_status.provisioned;
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
+    return provisioned;
 }
 
 bool wifi_manager_is_connected(void)
 {
-    return s_manager_status.connected && s_manager_status.has_ip;
+    bool connected;
+    portENTER_CRITICAL(&s_manager_status_spinlock);
+    connected = s_manager_status.connected && s_manager_status.has_ip;
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
+    return connected;
 }
 
 esp_err_t wifi_manager_get_ip(esp_ip4_addr_t *ip)
 {
-    if (!s_manager_initialized || !ip || !s_manager_status.has_ip) {
+    if (!s_manager_initialized || !ip) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
+    if (!s_manager_status.has_ip) {
+        portEXIT_CRITICAL(&s_manager_status_spinlock);
+        return ESP_ERR_INVALID_STATE;
+    }
     *ip = s_manager_status.ip_addr;
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
+
     return ESP_OK;
 }
 
@@ -1555,7 +1636,10 @@ esp_err_t wifi_manager_get_mac(uint8_t *mac)
         return ESP_ERR_INVALID_ARG;
     }
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     memcpy(mac, s_manager_status.mac_address, 6);
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
+
     return ESP_OK;
 }
 
@@ -1565,7 +1649,9 @@ esp_err_t wifi_manager_get_ssid(char *ssid, size_t ssid_len)
         return ESP_ERR_INVALID_ARG;
     }
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     strncpy(ssid, s_manager_status.ssid, ssid_len - 1);
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
     ssid[ssid_len - 1] = '\0';
 
     return ESP_OK;
@@ -1597,16 +1683,22 @@ esp_err_t wifi_manager_clear_all_credentials(void)
         nvs_close(nvs_handle);
     }
 
+    portENTER_CRITICAL(&s_manager_status_spinlock);
     s_manager_status.provisioned = false;
     s_manager_status.connected = false;
     s_manager_status.has_ip = false;
     s_manager_status.state = WIFI_MANAGER_STATE_UNINITIALIZED;
     memset(s_manager_status.ssid, 0, sizeof(s_manager_status.ssid));
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
 
     return ESP_OK;
 }
 
 wifi_manager_state_t wifi_manager_get_state(void)
 {
-    return s_manager_status.state;
+    wifi_manager_state_t state;
+    portENTER_CRITICAL(&s_manager_status_spinlock);
+    state = s_manager_status.state;
+    portEXIT_CRITICAL(&s_manager_status_spinlock);
+    return state;
 }
