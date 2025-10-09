@@ -17,7 +17,6 @@
 #include "http_server.h"             // Migrated from http_adapter
 #include "mqtt_client_manager.h"     // Migrated from mqtt_adapter
 #include "device_config.h"           // Migrated component
-#include "shared_resource_manager.h"
 #include "sensor_reader.h"           // Migrated component - unified sensor interface
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
@@ -190,10 +189,6 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    // Inicializar sistema de recursos compartidos
-    ESP_LOGI(TAG, "Inicializando sistema de recursos compartidos...");
-    ESP_ERROR_CHECK(shared_resource_manager_init());
-    
     // Inicializar componente sensor_reader (DHT22 + sensores de suelo)
     ESP_LOGI(TAG, "Inicializando componente sensor_reader...");
     sensor_config_t sensor_cfg = {

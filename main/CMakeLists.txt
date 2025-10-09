@@ -9,9 +9,6 @@ idf_component_register(
         sensor_reader       # Migrated component - unified sensor interface
         device_config       # Migrated component - configuration management
 
-        # Shared resources (still needed)
-        infrastructure      # For shared_resource_manager only
-
         # ESP-IDF components
         nvs_flash
         esp_event
