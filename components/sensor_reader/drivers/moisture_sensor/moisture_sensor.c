@@ -113,7 +113,7 @@ esp_err_t sensor_read_with_raw(
     }
 
     *raw_adc = raw_value;
-
+    ESP_LOGI(TAG, "Raw ADC Value: %d Channel: %d", raw_value, channel);
     // Seleccionar valores de calibración según tipo de sensor
     int value_when_dry;
     int value_when_wet;

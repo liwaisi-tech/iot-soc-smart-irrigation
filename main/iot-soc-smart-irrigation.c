@@ -61,7 +61,8 @@ static void sensor_publishing_task(void *pvParameters)
             continue;  // Saltar publicación si no hay datos válidos
         }
 
-        // 2. LOG DE DATOS LEÍDOS (cada 5 ciclos = 2.5 minutos)
+        // 2. LOG DE DATOS LEÍDOS - SIEMPRE (independiente de MQTT)
+        // FIX: Mover logs ANTES del check MQTT para visibilidad en modo offline
         if (cycle_count % 5 == 0) {
             ESP_LOGI(TAG, "Cycle %" PRIu32 ": T=%.1f°C H=%.1f%% Soil=[%.1f%%, %.1f%%, %.1f%%] - Heap:%" PRIu32,
                      cycle_count,
@@ -76,16 +77,16 @@ static void sensor_publishing_task(void *pvParameters)
         // 3. VERIFICAR CONECTIVIDAD MQTT antes de publicar
         if (!mqtt_client_is_connected()) {
             if (cycle_count % 10 == 0) {
-                ESP_LOGW(TAG, "MQTT not connected, skipping data publish");
+                ESP_LOGW(TAG, "Cycle %" PRIu32 ": MQTT not connected, skipping data publish (sensors OK)", cycle_count);
             }
-            continue;
+            continue;  // No publicar si MQTT desconectado, pero sensores ya fueron logueados
         }
 
         // 4. PUBLICAR VÍA MQTT usando nuevo componente mqtt_client
         // mqtt_client acepta sensor_reading_t directamente (incluye ambient + soil data)
         ret = mqtt_client_publish_sensor_data(&reading);
         if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "MQTT publish failed: %s", esp_err_to_name(ret));
+            ESP_LOGW(TAG, "Cycle %" PRIu32 ": MQTT publish failed: %s", cycle_count, esp_err_to_name(ret));
             continue;
         }
 
@@ -136,8 +137,14 @@ static void main_wifi_event_handler(void* arg, esp_event_base_t event_base,
                     // Use default HTTP server configuration
                     esp_err_t ret = http_server_init(NULL);  // NULL = use defaults
                     if (ret == ESP_OK) {
-                        s_http_server_initialized = true;
-                        ESP_LOGI(TAG, "Servidor HTTP inicializado correctamente en IP: " IPSTR, IP2STR(&ip));
+                        // FIX: Start HTTP server (init only configures, start actually opens port)
+                        ret = http_server_start();
+                        if (ret == ESP_OK) {
+                            s_http_server_initialized = true;
+                            ESP_LOGI(TAG, "Servidor HTTP arrancado correctamente en IP: " IPSTR " puerto 80", IP2STR(&ip));
+                        } else {
+                            ESP_LOGE(TAG, "Error al arrancar servidor HTTP: %s", esp_err_to_name(ret));
+                        }
                     } else {
                         ESP_LOGE(TAG, "Error al inicializar servidor HTTP: %s", esp_err_to_name(ret));
                     }
