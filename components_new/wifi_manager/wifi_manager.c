@@ -116,6 +116,7 @@ static httpd_handle_t s_server = NULL;
 static esp_netif_t *s_ap_netif = NULL;
 static wifi_config_t s_received_wifi_config = {0};
 static wifi_manager_validation_result_t s_validation_result = WIFI_VALIDATION_OK;
+static portMUX_TYPE s_validation_spinlock = portMUX_INITIALIZER_UNLOCKED;
 static EventGroupHandle_t s_validation_event_group = NULL;
 
 // Minified HTML for WiFi configuration (~4KB)
@@ -515,25 +516,33 @@ static void prov_validation_event_handler(void* arg, esp_event_base_t event_base
         switch (event_id) {
             case WIFI_CONNECTION_EVENT_CONNECTED:
                 ESP_LOGD(TAG, "Validation: WiFi connected successfully");
+                portENTER_CRITICAL(&s_validation_spinlock);
                 s_validation_result = WIFI_VALIDATION_OK;
+                portEXIT_CRITICAL(&s_validation_spinlock);
                 xEventGroupSetBits(s_validation_event_group, VALIDATION_SUCCESS_BIT);
                 break;
 
             case WIFI_CONNECTION_EVENT_AUTH_FAILED:
                 ESP_LOGW(TAG, "Validation: WiFi authentication failed");
+                portENTER_CRITICAL(&s_validation_spinlock);
                 s_validation_result = WIFI_VALIDATION_AUTH_FAILED;
+                portEXIT_CRITICAL(&s_validation_spinlock);
                 xEventGroupSetBits(s_validation_event_group, VALIDATION_FAILED_BIT);
                 break;
 
             case WIFI_CONNECTION_EVENT_NETWORK_NOT_FOUND:
                 ESP_LOGW(TAG, "Validation: WiFi network not found");
+                portENTER_CRITICAL(&s_validation_spinlock);
                 s_validation_result = WIFI_VALIDATION_NETWORK_NOT_FOUND;
+                portEXIT_CRITICAL(&s_validation_spinlock);
                 xEventGroupSetBits(s_validation_event_group, VALIDATION_FAILED_BIT);
                 break;
 
             case WIFI_CONNECTION_EVENT_RETRY_EXHAUSTED:
                 ESP_LOGW(TAG, "Validation: WiFi connection timeout");
+                portENTER_CRITICAL(&s_validation_spinlock);
                 s_validation_result = WIFI_VALIDATION_TIMEOUT;
+                portEXIT_CRITICAL(&s_validation_spinlock);
                 xEventGroupSetBits(s_validation_event_group, VALIDATION_FAILED_BIT);
                 break;
 
@@ -573,7 +582,9 @@ static esp_err_t prov_manager_validate_credentials(const char* ssid, const char*
         strncpy((char*)validation_config.sta.password, password, sizeof(validation_config.sta.password) - 1);
     }
 
+    portENTER_CRITICAL(&s_validation_spinlock);
     s_validation_result = WIFI_VALIDATION_OK;
+    portEXIT_CRITICAL(&s_validation_spinlock);
     xEventGroupClearBits(s_validation_event_group, VALIDATION_SUCCESS_BIT | VALIDATION_FAILED_BIT);
 
     ret = connection_manager_connect(&validation_config);
@@ -594,8 +605,11 @@ static esp_err_t prov_manager_validate_credentials(const char* ssid, const char*
         ESP_LOGI(TAG, "WiFi credential validation successful");
         *result = WIFI_VALIDATION_OK;
     } else if (bits & VALIDATION_FAILED_BIT) {
-        ESP_LOGW(TAG, "WiFi credential validation failed: %d", s_validation_result);
-        *result = s_validation_result;
+        portENTER_CRITICAL(&s_validation_spinlock);
+        wifi_manager_validation_result_t validation_result = s_validation_result;
+        portEXIT_CRITICAL(&s_validation_spinlock);
+        ESP_LOGW(TAG, "WiFi credential validation failed: %d", validation_result);
+        *result = validation_result;
     } else {
         ESP_LOGW(TAG, "WiFi credential validation timeout");
         *result = WIFI_VALIDATION_TIMEOUT;

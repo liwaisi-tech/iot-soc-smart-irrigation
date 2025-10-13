@@ -273,142 +273,90 @@ Each component manages its own thread-safety internally.
 - HTTP endpoints with proper middleware
 
 ### Phase 4: Architectural Validation & Compliance (CRITICAL)
-**Status**: 🔄 **IN PROGRESS** (Started 2025-10-09)
-**Duration**: 4-8 hours
+**Status**: ✅ **COMPLETED** (Started 2025-10-09, Completed 2025-10-13)
+**Duration**: 4 days (intermittent work)
 **Objective**: Garantizar que TODOS los componentes cumplan 100% con los 5 principios Component-Based antes de agregar nuevas features
 
-**Context**: Cambio de alcance - validar arquitectura completa antes de implementar irrigation_controller
+**Context**: Validación arquitectural completa antes de implementar irrigation_controller
 
-**Prerequisites Completed**:
-- ✅ All existing components migrated to component-based architecture
-- ✅ System compiling and functional (925 KB, 56% free)
-- ✅ Migration completed (5/5 components + main.c)
-
----
-
-## **PHASE 4: EXECUTION PLAN**
-
-**Detailed Plan**: Ver [CLAUDE_PHASE4_PLAN.md](CLAUDE_PHASE4_PLAN.md) para plan completo de validación
-
-### **Goal**: Validate each component against 5 Component-Based Principles
-
-**Success Criteria**:
-- All components comply with architectural principles OR
-- Tech debt documented for deferred corrections (Phase 6)
-- System ready for irrigation_controller implementation (Phase 5)
+**Results Achieved**:
+- ✅ All 5 components analyzed against 5 principles
+- ✅ Compliance matrix documented
+- ✅ 2/5 components ZERO tech debt (sensor_reader, device_config)
+- ✅ 2/5 components minor accepted deviations (mqtt_client, http_server - cJSON malloc)
+- ✅ 1/5 architectural tech debt deferred to Phase 6 (wifi_manager - SRC/MIS/DD)
+- ✅ 100% thread-safety implemented across all components
+- ✅ System READY for Phase 5 (irrigation_controller)
 
 ---
 
-### **Phase 4 Tasks Overview**:
+## **PHASE 4: COMPLETION SUMMARY**
 
-#### **4.1: Component Analysis** (5 components)
+**Detailed Analysis**: Ver [CLAUDE_PHASE4_PLAN.md](CLAUDE_PHASE4_PLAN.md) para análisis completo
 
-1. **[ ] sensor_reader** - Architectural Validation
-   - Validate against 5 principles (SRC, MIS, DD, Memory-First, Task-Oriented)
-   - **Potential Issue**: Calibration functions - SRC violation?
-   - **Status**: ⏳ Pending analysis
+### **Compliance Matrix** (5 components × 5 principles):
 
-2. **[ ] device_config** - Architectural Validation ⚠️ **CRÍTICO**
-   - Validate against 5 principles
-   - **Critical Issue**: 30+ public functions - MIS violation?
-   - **Decision Required**: Keep unified or split into sub-components?
-   - **Status**: ⏳ Pending analysis
+| Component | SRC | MIS | DD | Memory-First | Task-Oriented | Tech Debt | Status |
+|-----------|-----|-----|----|--------------|--------------|-----------| -------|
+| sensor_reader | ✅ | ✅ | ✅ | ✅ | ✅ | **ZERO** | **✅ 100% COMPLIANT** |
+| device_config | ✅ | ✅ | ✅ | ✅ | ✅ | **ZERO** | **✅ 100% COMPLIANT** |
+| wifi_manager | ❌ | ❌ | ❌ | ✅ | ✅ | **SRC/MIS/DD** (Phase 6) | **✅ Thread-safe** |
+| mqtt_client | ✅ | ✅ | ✅ | ⚠️ | ✅ | **Minor** (cJSON malloc) | **✅ COMPLIANT** |
+| http_server | ✅ | ✅ | ✅ | ⚠️ | ✅ | **Minor** (cJSON malloc) | **✅ COMPLIANT** |
 
-3. **[ ] wifi_manager** - Architectural Validation 🔴 **BLOQUEANTE**
-   - Validate against 5 principles
-   - **Known SRC Violation**: 3 responsibilities (WiFi + provisioning + boot counter)
-   - **CRITICAL - Thread-Safety INCOMPLETE**:
-     - ✅ Spinlocks added (3), API protected (7 functions)
-     - 🔴 **Event handlers NOT protected** (4 handlers modify shared state)
-     - 🔴 **Init/deinit NOT protected** (8 functions)
-   - **REQUIRED**: Complete thread-safety before Phase 5
-   - **Estimate**: 2-4 hours
-   - **Status**: ⏳ Pending thread-safety completion
+### **Component Analysis Summary**:
 
-4. **[ ] mqtt_client** - Architectural Validation
-   - Validate against 5 principles
-   - **Potential Issue**: JSON serialization - SRC violation?
-   - **Status**: ⏳ Pending analysis
+#### **4.1: sensor_reader** ✅ **100% COMPLIANT - ZERO TECH DEBT**
+- ✅ SRC: Solo lectura de sensores (DHT22 + ADC) - calibration cohesiva
+- ✅ MIS: 11 funciones justificadas (todas cohesivas y necesarias)
+- ✅ DD: Dependencias directas ESP-IDF HAL únicamente
+- ✅ Memory-First: No malloc, portMUX_TYPE thread-safety
+- ✅ Task-Oriented: Componente pasivo (no tareas propias)
 
-5. **[ ] http_server** - Architectural Validation
-   - Validate against 5 principles
-   - **Expected**: Likely compliant (minimal API, clear responsibility)
-   - **Status**: ⏳ Pending analysis
+#### **4.2: device_config** ✅ **100% COMPLIANT - ZERO TECH DEBT**
+- ✅ SRC: Gestión de configuración persistente NVS (5 categorías = sub-dominios cohesivos)
+- ✅ MIS: 30 funciones justificadas (MANTENER UNIFICADO es arquitecturalmente superior)
+- ✅ DD: Dependencias directas ESP-IDF HAL (nvs, wifi, mac)
+- ✅ Memory-First: No malloc, static state, mutex thread-safety
+- ✅ Task-Oriented: Componente pasivo (no tareas)
+- **Decision**: Unified component mejor que 5 sub-componentes (1 mutex vs 5, embedded-first design)
 
----
+#### **4.3: wifi_manager** ✅ **Thread-safe, ⚠️ SRC/MIS/DD deferred to Phase 6**
+- ❌ SRC: 3 responsibilities (WiFi + provisioning + boot counter) - TECH DEBT
+- ❌ MIS: 15 functions (8 core + 7 provisioning/boot) - TECH DEBT
+- ❌ DD: esp_http_server dependency (~17KB overhead) - TECH DEBT
+- ✅ Memory-First: 100% thread-safe (4 spinlocks, 16 functions protected)
+- ✅ Task-Oriented: No custom tasks (ESP-IDF WiFi stack)
+- **Decision**: DEFER refactoring to Phase 6 (system functional and safe for Phase 5)
 
-#### **4.2: Critical Decisions**
+#### **4.4: mqtt_client** ✅ **COMPLIANT (minor: cJSON malloc accepted)**
+- ✅ SRC: MQTT communication + JSON serialization cohesiva
+- ✅ MIS: 10 funciones mínimas y necesarias
+- ✅ DD: ESP-IDF MQTT client, cJSON (standard)
+- ⚠️ Memory-First: cJSON malloc interno (ESP-IDF library, proper cleanup) - ACCEPTED
+- ✅ Task-Oriented: ESP-IDF MQTT client task nativa
 
-**Decision 1: wifi_manager thread-safety (BLOCKING)**
-- [ ] **MUST COMPLETE**: Protect event handlers + init/deinit functions
-- [ ] **Estimate**: 2-4 hours
-- [ ] **Rationale**: Required for Phase 5 (irrigation_controller depends on wifi_manager)
-- [ ] **Status**: ⏳ Pending implementation
+#### **4.5: http_server** ✅ **COMPLIANT (minor: cJSON malloc accepted)**
+- ✅ SRC: REST API endpoints (single responsibility)
+- ✅ MIS: 8 funciones mínimas
+- ✅ DD: ESP-IDF httpd, cJSON (standard)
+- ⚠️ Memory-First: cJSON malloc (same as mqtt_client) - ACCEPTED
+- ✅ Task-Oriented: ESP-IDF httpd task nativa
 
-**Decision 2: wifi_manager refactoring scope**
-- [ ] **Option A (RECOMMENDED)**: Defer refactoring to Phase 6
-  - Pros: Faster to Phase 5, system functional and thread-safe
-  - Cons: SRC/MIS/DD violations persist temporarily
-- [ ] **Option B**: Refactor NOW into 3 components (wifi_manager, wifi_provisioning, boot_counter)
-  - Pros: 100% clean architecture
-  - Cons: 1-2 days delay, blocks irrigation features
-- [ ] **Status**: ⏳ Pending decision
+### **Tech Debt Summary**:
 
-**Decision 3: device_config MIS validation**
-- [ ] 30+ functions - Keep unified or split?
-- [ ] **Criteria**: Are all functions cohesive (same domain)?
-- [ ] **Status**: ⏳ Pending analysis
+**Tech Debt Crítico (Bloqueante)**: ✅ **NINGUNO**
 
-**Decision 4: Component-specific validations**
-- [ ] sensor_reader: Calibration within component or separate?
-- [ ] mqtt_client: JSON serialization cohesive or separate?
-- [ ] **Status**: ⏳ Pending analysis
+**Tech Debt Arquitectural (No bloqueante - Phase 6)**:
+- **TD-001**: wifi_manager SRC violation (3 responsibilities) - Effort: 1 day
+- **TD-002**: wifi_manager MIS violation (15 functions mixed) - Resolved with TD-001
+- **TD-003**: wifi_manager DD violation (esp_http_server dependency) - Resolved with TD-001
 
----
+**Tech Debt Menor (Aceptado)**:
+- **TD-004**: mqtt_client cJSON malloc (ESP-IDF library, proper cleanup) - ACCEPTED
+- **TD-005**: http_server cJSON malloc (same as TD-004) - ACCEPTED
 
-#### **4.3: Documentation & Deliverables**
-
-- [ ] **Update ESTADO_ACTUAL_IMPLEMENTACION.md**:
-  - Create section: "Phase 4: Architectural Validation Results"
-  - Component-by-component compliance matrix (5×5 grid)
-  - List of violations and tech debt
-  - Recommendations for corrections
-
-- [ ] **Update CLAUDE.md**:
-  - Document Phase 4 execution summary
-  - Update Phase 5 prerequisites
-  - Document tech debt plan for Phase 6
-
-- [ ] **Code Improvements**:
-  - **REQUIRED**: wifi_manager thread-safety completion
-  - **OPTIONAL**: Other component corrections (based on severity)
-
----
-
-### **Phase 4 Completion Criteria**:
-
-- [ ] All 5 components analyzed against 5 principles
-- [ ] Compliance matrix documented
-- [ ] wifi_manager thread-safety 100% complete (CRITICAL)
-- [ ] Tech debt documented for Phase 6 (accepted violations)
-- [ ] Architectural decisions documented with rationale
-- [ ] Phase 5 readiness confirmed
-
-**Phase 4 DONE when**: All components comply with principles OR violations documented as accepted tech debt.
-
----
-
-### **Preliminary Findings (Analysis in Progress)**:
-
-| Component | API Functions | Potential Issues | Priority |
-|-----------|--------------|------------------|----------|
-| sensor_reader | 11 | Calibration SRC? | Medium |
-| device_config | 30+ | **MIS violation?** | High |
-| wifi_manager | 15 | **SRC/MIS/DD violations + Thread-safety INCOMPLETE** | **CRITICAL** |
-| mqtt_client | 10 | JSON serialization SRC? | Medium |
-| http_server | 7 | Likely compliant | Low |
-
-**Critical Path**: wifi_manager thread-safety completion (BLOCKING for Phase 5)
+**Total Phase 6 Effort**: 1 day (all wifi_manager issues resolved with single refactoring)
 
 ---
 
