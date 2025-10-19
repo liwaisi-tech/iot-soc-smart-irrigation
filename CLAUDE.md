@@ -1,39 +1,80 @@
 # CLAUDE.md - Smart Irrigation System Project Guide
 
-**Last Updated**: 2025-10-09
-**Version**: 2.0.0 - Component-Based Architecture (MIGRACIÓN COMPLETADA)
+**Last Updated**: 2025-10-18
+**Version**: 2.0.0 - Component-Based Architecture + Phase 5 Ready
+**Current Phase**: ⏳ Phase 5 - Irrigation Control Implementation
 
 ---
 
-## 🔴 CRITICAL: MIGRATION PRINCIPLE (READ FIRST)
+## 🔴 CRITICAL: PHASE 5 IMPLEMENTATION RULES (READ FIRST)
 
-### **MIGRACIÓN COMPLETADA - PHASE 4 DESBLOQUEADA**
+### **BEFORE STARTING PHASE 5 - READ THESE**
 
-**Current Status**: ✅ Migration from Hexagonal → Component-Based Architecture COMPLETED
+1. **✅ COMPONENT-BASED ARCHITECTURE MANDATORY**
+   - All new code MUST follow 5 core principles (see ESTADO_ACTUAL_IMPLEMENTACION.md line 49-103)
+   - **SRC**: Single Responsibility per component
+   - **MIS**: Minimal Interface Segregation (small focused APIs)
+   - **DD**: Direct Dependencies (no unnecessary abstraction layers)
+   - **Memory-First**: Static allocation, NO malloc in component logic
+   - **Task-Oriented**: Components are passive (FreeRTOS tasks managed by main)
 
-**REGLA DE ORO APLICADA EXITOSAMENTE**:
-✅ **COMPLETADO**: Migración de TODOS los componentes existentes antes de features nuevas
-✅ **COMPLETADO**: Sistema compilable completo validado
-✅ **LISTO**: Implementar `irrigation_controller` y `system_monitor` (Phase 4 y 5)
-✅ **VALIDADO**: Arquitectura component-based funcional con código probado
+2. **✅ REFERENCE EXISTING COMPONENTS AS TEMPLATES**
+   - Use `sensor_reader`, `device_config`, `mqtt_client` as architectural reference
+   - All 5 existing components validated and thread-safe - **follow their patterns exactly**
+   - Check `detalles_implementacion_nva_arqutectura.md` for compliance matrix
 
-**Rationale Validado**:
-1. ✅ Arquitectura component-based validada con código probado
-2. ✅ Problemas aislados: Migración exitosa sin mezclar con features
-3. ✅ `components/` preservado como respaldo funcional
-4. ✅ Validación incremental completada sin rollback necesario
+3. **✅ THREAD-SAFETY IS NON-NEGOTIABLE**
+   - All shared state MUST be protected (portMUX_TYPE spinlock or mutex)
+   - Review `wifi_manager` (lines 79-158) for spinlock implementation examples
+   - See ESTADO_ACTUAL_IMPLEMENTACION.md lines 162-180 for thread-safety patterns
 
-**Estado Actual (100% completado)**:
-- ✅ **sensor_reader** migrado y compilando (2.8 KB Flash)
-- ✅ **device_config** migrado y compilando (0.8 KB Flash)
-- ✅ **wifi_manager** migrado y compilando (11.6 KB Flash)
-- ✅ **mqtt_client** migrado y compilando (3.9 KB Flash)
-- ✅ **http_server** migrado y compilando (2.3 KB Flash)
-- ✅ **main.c** 100% Component-Based (2.0 KB Flash)
-- 🟢 **irrigation_controller** LISTO PARA IMPLEMENTAR (Phase  DESBLOQUEADA)
-- 🟢 **system_monitor** LISTO PARA IMPLEMENTAR (Phase 5)
+4. **✅ EXECUTION PLAN MANDATORY - DO NOT SKIP**
+   - **FIRST**: Read `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md` completely
+   - **SECOND**: Read `Logica_de_riego.md` for irrigation logic requirements
+   - **THIRD**: Follow the plan step-by-step (never mix multiple tasks)
 
-**Compilación Actual**: ✅ Binary 925 KB (56% free partition space)
+5. **✅ COMPILATION & BINARY SIZE CONSTRAINTS**
+   - Binary current: 942.80 KB | Max allowed: 1.5 MB | Headroom: 1.14 MB (56% free)
+   - **After irrigation_controller**: Must be < 1.4 MB
+   - Run AFTER every change: `idf.py build && idf.py size-components`
+
+6. **✅ NO PHASE MIXING - GOLDEN RULE**
+   - `irrigation_controller` = **Phase 5 ONLY** (complete it 100%)
+   - `system_monitor` = Phase 5+ (do NOT start until irrigation_controller working)
+   - This rule prevented chaos in Phase 4 - **do not violate it**
+
+7. **✅ DOCUMENTATION UPDATE AFTER EACH STEP - MANDATORY**
+   - After EVERY step in `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md` is completed:
+     1. Update `CLAUDE.md` (first 50 lines) with new status
+     2. Update `ESTADO_ACTUAL_IMPLEMENTACION.md` with detailed changes
+     3. Run: `git status` to verify files changed
+     4. Commit with clear message: `"Phase 5: [step_name] - [what_changed]"`
+   - This keeps documentation in sync with code (prevent information decay)
+
+---
+
+## 🎯 CURRENT STATUS - Phase 4 Complete, Phase 5 Ready
+
+| Component | Status | Thread-Safe | Location | Notes |
+|-----------|--------|---|---|---|
+| sensor_reader | ✅ | ✅ 100% | `components/sensor_reader/` | DHT22 + 3 ADC |
+| device_config | ✅ | ✅ 100% | `components/device_config/` | NVS + WiFi + MQTT + Irrigation |
+| wifi_manager | ✅ | ✅ 100% | `components/wifi_manager/` | 4 spinlocks protecting state |
+| mqtt_client | ✅ | ✅ 100% | `components/mqtt_client/` | Kconfig: MQTT_BROKER_URI |
+| http_server | ✅ | ✅ 100% | `components/http_server/` | REST endpoints |
+| **irrigation_controller** | 📋 | ⏳ | `components/` | **Phase 5 - START HERE** |
+
+**Binary**: 942.80 KB (56% free = 1.14 MB) | **Compilation**: ✅ No errors | **ESP-IDF**: v5.4.2
+
+---
+
+## 📚 PHASE 5 DOCUMENTATION MAP - START HERE
+
+**Read in this order:**
+1. **PLAN_EJECUCION_IRRIGATION_CONTROLLER.md** ← **READ FIRST**
+2. **Logica_de_riego.md** - Irrigation logic & thresholds
+3. **detalles_implementacion_nva_arqutectura.md** - Architecture principles (lines 49-103)
+4. **ESTADO_ACTUAL_IMPLEMENTACION.md** - Thread-safety patterns (lines 162-180)
 
 ---
 
@@ -128,18 +169,19 @@ This is a **Smart Irrigation System** IoT project built with **ESP-IDF** for ESP
 
 ```
 smart_irrigation_system/
-├── components_new/          # ✅ ACTIVE - Component-Based Architecture
-│   ├── wifi_manager/        # WiFi connectivity + provisioning (11.6 KB)
+├── components/              # ✅ ACTIVE - Component-Based Architecture
+│   ├── wifi_manager/        # WiFi connectivity + provisioning
 │   │   ├── wifi_manager.h
-│   │   ├── wifi_manager.c   (1612 lines)
+│   │   ├── wifi_manager.c
 │   │   └── CMakeLists.txt
 │   │
-│   ├── mqtt_client/         # MQTT client + WebSockets (3.9 KB)
+│   ├── mqtt_client/         # MQTT client + WebSockets (with Kconfig)
 │   │   ├── mqtt_client_manager.h
-│   │   ├── mqtt_adapter.c   (957 lines)
+│   │   ├── mqtt_adapter.c
+│   │   ├── Kconfig          # NEW: MQTT_BROKER_URI configuration
 │   │   └── CMakeLists.txt
 │   │
-│   ├── sensor_reader/       # Sensor reading unified (2.8 KB)
+│   ├── sensor_reader/       # Sensor reading unified (DHT22 + ADC)
 │   │   ├── sensor_reader.h
 │   │   ├── sensor_reader.c
 │   │   ├── drivers/
@@ -147,39 +189,30 @@ smart_irrigation_system/
 │   │   │   └── moisture_sensor/  # ADC soil sensors
 │   │   └── CMakeLists.txt
 │   │
-│   ├── http_server/         # HTTP REST endpoints (2.3 KB)
+│   ├── http_server/         # HTTP REST endpoints
 │   │   ├── http_server.h
-│   │   ├── http_server.c    (755 lines)
+│   │   ├── http_server.c
 │   │   └── CMakeLists.txt
 │   │
-│   ├── device_config/       # NVS configuration (0.8 KB)
-│   │   ├── device_config.h
-│   │   ├── device_config.c  (1090 lines)
-│   │   └── CMakeLists.txt
-│   │
-│   ├── irrigation_controller/  # 🟢 READY TO IMPLEMENT (Phase 5)
-│   │   ├── irrigation_controller.h
-│   │   └── CMakeLists.txt
-│   │
-│   └── system_monitor/      # ⏳ PENDING (Phase 5)
-│       ├── system_monitor.h
+│   └── device_config/       # NVS configuration
+│       ├── device_config.h
+│       ├── device_config.c
 │       └── CMakeLists.txt
 │
-├── components/              # 🔴 DEPRECATED - Hexagonal Architecture (backup)
-│   ├── domain/              # Preserved for reference
-│   ├── application/         # No longer used in build
-│   └── infrastructure/      # No longer used in build
-│
 ├── main/                    # Application entry point
-│   ├── iot-soc-smart-irrigation.c  # 100% Component-Based (2.0 KB)
+│   ├── iot-soc-smart-irrigation.c  # 100% Component-Based
 │   └── CMakeLists.txt
 │
 ├── include/
 │   └── common_types.h       # Shared types across components
 │
+├── future_components/       # Reference/documentation only
+│   └── irrigation_controller/  # 📋 Plan documentado (Phase 5)
+│
 └── docs/                    # Project documentation
-    ├── CLAUDE.md            # This file
-    ├── ESTADO_ACTUAL_IMPLEMENTACION.md
+    ├── CLAUDE.md            # This file - Quick reference guide
+    ├── ESTADO_ACTUAL_IMPLEMENTACION.md  # Detailed status
+    ├── PLAN_EJECUCION_IRRIGATION_CONTROLLER.md  # Phase 5 execution plan
     └── detalles_implementacion_nva_arqutectura.md
 ```
 
@@ -360,26 +393,26 @@ Each component manages its own thread-safety internally.
 
 ---
 
-### Phase 5: Irrigation Control Implementation (NEXT - POST PHASE 4)
-**Status**: ⏳ READY TO START
+### Phase 5: Irrigation Control Implementation (NEXT)
+**Status**: 📋 DOCUMENTED - EXECUTION PLAN READY
 **Objective**: Implement valve control and irrigation automation
 
-**Prerequisites** (All Completed):
+**Key Documentation**:
+- See `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md` for detailed execution plan
+- See `Logica_de_riego.md` for irrigation logic specifications
+
+**Prerequisites** (All Completed ✅):
 - ✅ Component-based architecture validated and functional
-- ✅ Thread-safety 100% implemented
+- ✅ Thread-safety 100% implemented across all 5 components
+- ✅ MQTT client functional with configurable broker (Kconfig)
+- ✅ System compiles successfully (942.80 KB, 56% free)
 - ✅ System stable and demo-ready
 
-**Implementation Tasks**:
-1. ⏳ Implement `irrigation_controller` component (NEW)
-   - Valve control drivers (GPIO/relay)
-   - Irrigation state machine
-   - Safety interlocks
-2. ⏳ MQTT command subscription (`irrigation/control/{mac}`)
-3. ⏳ Offline automatic irrigation logic
-   - Threshold-based decisions
-   - Emergency mode handling
-4. ⏳ Integration with existing sensor_reader and mqtt_client
-5. ⏳ Hardware testing with physical valves
+**To Start Phase 5**:
+1. Review `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md`
+2. Create `components/irrigation_controller/` component
+3. Implement valve control drivers
+4. Follow component-based principles from Phase 4 validation
 
 **Estimated Duration**: 1-2 days
 
@@ -873,47 +906,50 @@ File: esp32_smart_irrigation_agent_prompt.md
 ## Project Status Summary
 
 **Version**: 2.0.0 (Component-Based Architecture)
-**Last Updated**: 2025-10-09 (Phase 4 Completed)
+**Last Updated**: 2025-10-18 (Phase 4 Final - MQTT Kconfig + Validation Complete)
 **Maintainer**: Liwaisi Tech Team
 **License**: MIT
 
-**Current Phase**: ✅ Phase 4 COMPLETED - Architectural Validation & Thread-Safety
-**Next Phase**: Phase 5 - Irrigation Control Implementation (post-video)
-**Migration Status**: ✅ COMPLETED - Component-Based Architecture (100%)
-**Thread-Safety Status**: ✅ COMPLETED - 100% thread-safe (2025-10-09)
+**Current Phase**: ✅ Phase 4 COMPLETED (Oct 13-18) - Architectural Validation & Thread-Safety + MQTT Config
+**Next Phase**: Phase 5 - Irrigation Control Implementation (see PLAN_EJECUCION_IRRIGATION_CONTROLLER.md)
+**Migration Status**: ✅ COMPLETED - Component-Based Architecture (100%) in `/components/`
+**Thread-Safety Status**: ✅ COMPLETED - 100% thread-safe across all 5 components
 **Flash Configuration**: 4MB (No OTA support - Manual USB updates)
-**Binary Size**: 926 KB (56% free partition space, < 1KB overhead from thread-safety)
-**System Status**: ✅ **DEMO-READY** - Arquitectura validada, thread-safe, compilando sin errores
-**Ready for**: Video/demostración de arquitectura Component-Based limpia y funcional
+**Binary Size**: 942.80 KB (56% free partition space = 1.14 MB available)
+**Latest Update**: Oct 18 - MQTT Kconfig added for MQTT_BROKER_URI configuration
+**System Status**: ✅ **DEMO-READY & PRODUCTION-READY** - Arquitectura validada, thread-safe, compiles sin errores
+**Ready for**: Phase 5 implementation (irrigation control with safety interlocks)
 
-The codebase has successfully **migrated from Hexagonal to Component-Based Architecture** with thread-safety 100% implemented. System is **DEMO-READY** for sensor monitoring and data communication showcase. **Phase 4 completed** with wifi_manager fully thread-safe. **Phase 5 ready to start** (post-video) for irrigation control features with offline mode safety prioritized for rural reliability. **OTA updates postponed to Phase 6** - current deployment requires USB connection for firmware updates.
+The codebase has successfully **migrated from Hexagonal to Component-Based Architecture** with thread-safety 100% implemented across all 5 components. MQTT client now configurable via Kconfig. **Phase 4 completed** with comprehensive validation and final adjustments (Oct 18). **Phase 5 ready to start** for irrigation control features with offline mode safety prioritized for rural reliability. See `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md` for execution plan. **OTA updates postponed to Phase 6** - current deployment requires USB connection for firmware updates.
 
-### Migration & Optimization Results (v2.0.0) - PHASE 4 COMPLETED
+### Migration & Optimization Results (v2.0.0) - PHASE 4 COMPLETED (Oct 18)
 
-**Migration Status**: ✅ 100% Component-Based Architecture
-**Thread-Safety Status**: ✅ 100% Implemented (Phase 4 - 2025-10-09)
-**Architectural Validation**: ✅ All 5 principles validated (2025-10-09)
+**Migration Status**: ✅ 100% Component-Based Architecture (in `/components/`)
+**Thread-Safety Status**: ✅ 100% Implemented (all 5 components - Oct 9-13)
+**Architectural Validation**: ✅ All 5 principles validated (Oct 13)
+**MQTT Configuration**: ✅ Kconfig added (Oct 18) - MQTT_BROKER_URI configurable
 **Total Components Migrated**: 5/5 (wifi_manager, mqtt_client, http_server, device_config, sensor_reader)
 **Critical Functionality**: ✅ All maintained and improved
 
-| Component | Flash Size | Status | Thread-Safety | Notes |
-|-----------|------------|--------|---------------|-------|
-| wifi_manager | 11.6 KB | ✅ Migrated + Enhanced | ✅ **100% Complete** | WiFi + provisioning + spinlocks |
-| mqtt_client | 3.9 KB | ✅ Migrated | ✅ Task-based | MQTT + WebSockets |
-| http_server | 2.3 KB | ✅ Migrated | ✅ ESP-IDF native | REST endpoints |
-| sensor_reader | 2.8 KB | ✅ Migrated | ✅ portMUX_TYPE | DHT22 + 3 ADC |
-| device_config | 0.8 KB | ✅ Migrated | ✅ Mutex interno | NVS management |
-| main.c | 2.0 KB | ✅ Updated | N/A | 100% Component-Based |
-| **Total** | **~23 KB** | ✅ Complete | ✅ **100% Safe** | Binary: 926 KB (56% free) |
+| Component | Status | Thread-Safety | Configuration | Notes |
+|-----------|--------|---|---|-------|
+| wifi_manager | ✅ Migrated + Enhanced | ✅ **100% Complete** | - | WiFi + provisioning + 4 spinlocks |
+| mqtt_client | ✅ Migrated + Config | ✅ Task-based | **Kconfig (Oct 18)** | MQTT_BROKER_URI configurable |
+| http_server | ✅ Migrated | ✅ ESP-IDF native | - | REST endpoints |
+| sensor_reader | ✅ Migrated | ✅ portMUX_TYPE | - | DHT22 + 3 ADC sensors |
+| device_config | ✅ Migrated | ✅ Mutex interno | - | NVS + WiFi + MQTT + Irrigation configs |
+| main.c | ✅ Updated | N/A | - | 100% Component-Based orchestration |
+| **Binary** | **942.80 KB** | ✅ **100% Safe** | - | **56% free (1.14 MB available)** |
 
 **Key Achievements Phase 1-4**:
 - ✅ Eliminated `shared_resource_manager` (~6 KB saved, better encapsulation)
-- ✅ Thread-safety 100% implemented across all components
+- ✅ Thread-safety 100% implemented across all 5 components
 - ✅ Direct dependencies (no excessive abstraction layers)
 - ✅ Memory-first design validated across all components
-- ✅ **wifi_manager fully thread-safe** (Phase 4): 16 functions/handlers protected with spinlocks
+- ✅ **wifi_manager fully thread-safe** (Phase 4): 16 functions/handlers with spinlocks
+- ✅ **mqtt_client configurable** (Oct 18): Broker URI via Kconfig (mqtt://, ws://, wss://)
 - ✅ Race conditions ELIMINATED
-- ✅ System compiling without errors (926 KB, < 1KB overhead from thread-safety)
+- ✅ System compiling without errors (< 1KB overhead from thread-safety)
 
 **Available Space for Phase 5**: 1.14 MB free (56%) for irrigation_controller, valve drivers, and offline logic
 
