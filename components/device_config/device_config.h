@@ -396,7 +396,7 @@ esp_err_t device_config_set_reading_interval(uint16_t interval);
 /**
  * @brief Default MQTT broker
  */
-#define DEVICE_CONFIG_DEFAULT_MQTT_BROKER   "wss://mqtt.liwaisi.tech/mqtt"
+#define DEVICE_CONFIG_DEFAULT_MQTT_BROKER   "wss://mqtt.192.168.1.177:1883"
 #define DEVICE_CONFIG_DEFAULT_MQTT_PORT     8083
 
 /**

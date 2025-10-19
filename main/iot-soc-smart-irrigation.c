@@ -204,7 +204,7 @@ void app_main(void)
         .filter_window_size = 5,
         .dht22_gpio = GPIO_DHT22,           // Definido en common_types.h como 18
         .dht22_read_timeout_ms = 2000,
-        .adc_attenuation = ADC_ATTEN_DB_11,
+        .adc_attenuation = ADC_ATTEN_DB_12,
         .soil_cal_dry_mv = {2800, 2800, 2800},
         .soil_cal_wet_mv = {1200, 1200, 1200},
         .max_consecutive_errors = 5

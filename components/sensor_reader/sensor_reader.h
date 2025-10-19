@@ -256,7 +256,7 @@ esp_err_t sensor_reader_get_soil_calibration(uint8_t sensor_index,
     .filter_window_size = 5,                    \
     .dht22_gpio = GPIO_DHT22,                   \
     .dht22_read_timeout_ms = 2000,              \
-    .adc_attenuation = ADC_ATTEN_DB_11,         \
+    .adc_attenuation = ADC_ATTEN_DB_12,         \
     .soil_cal_dry_mv = {2800, 2800, 2800},      \
     .soil_cal_wet_mv = {1200, 1200, 1200},      \
     .max_consecutive_errors = 5                 \

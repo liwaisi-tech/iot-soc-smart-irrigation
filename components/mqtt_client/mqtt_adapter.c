@@ -31,6 +31,8 @@
 #include "device_config.h"
 #include "wifi_manager.h"
 
+#include "sdkconfig.h"
+
 #include <string.h>
 #include <stdio.h>
 #include <inttypes.h>
@@ -39,8 +41,9 @@
 
 static const char *TAG = "mqtt_client";
 
-// MQTT Configuration Defaults (from sdkconfig or hardcoded)
-#define MQTT_DEFAULT_BROKER_URI         "wss://mqtt.liwaisi.tech/mqtt"
+// Use menuconfig-provided broker URI
+#define MQTT_DEFAULT_BROKER_URI CONFIG_MQTT_BROKER_URI
+
 #define MQTT_DEFAULT_PORT               8083
 #define MQTT_DEFAULT_KEEPALIVE_SEC      60
 #define MQTT_DEFAULT_USE_WEBSOCKETS     true

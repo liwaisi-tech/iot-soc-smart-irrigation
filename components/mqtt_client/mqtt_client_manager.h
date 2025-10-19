@@ -26,6 +26,7 @@
 #include "esp_event.h"
 #include "common_types.h"
 #include <stdbool.h>
+#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -262,15 +263,19 @@ typedef enum {
 /**
  * @brief Default MQTT configuration
  */
+#ifndef CONFIG_MQTT_BROKER_URI
+#define CONFIG_MQTT_BROKER_URI "mqtt://mqtt.liwaisi.tech/mqtt"
+#endif
+
 #define MQTT_CLIENT_DEFAULT_CONFIG() {      \
-    .broker_uri = "wss://mqtt.liwaisi.tech/mqtt", \
-    .broker_port = 8083,                    \
-    .client_id = "",                        \
-    .username = "",                         \
-    .password = "",                         \
-    .keepalive_sec = 60,                    \
-    .use_websockets = true,                 \
-    .enable_ssl = true                      \
+    .broker_uri = CONFIG_MQTT_BROKER_URI,  \
+    .broker_port = 8083,                   \
+    .client_id = "",                      \
+    .username = "",                       \
+    .password = "",                       \
+    .keepalive_sec = 60,                   \
+    .use_websockets = true,                \
+    .enable_ssl = true                     \
 }
 
 /**

@@ -1,0 +1,13 @@
+menu "MQTT Client Configuration"
+
+    config MQTT_BROKER_URI
+        string "MQTT Broker URI"
+        default "mqtt://mqtt.liwaisi.tech/mqtt"
+        help
+            MQTT broker URI used by the MQTT client.
+            Examples:
+            - mqtt://broker.example.com:1883
+            - ws://broker.example.com:8080/mqtt
+            - wss://broker.example.com:8083/mqtt
+
+endmenu
