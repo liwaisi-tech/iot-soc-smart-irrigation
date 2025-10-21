@@ -1,55 +1,16 @@
 # CLAUDE.md - Smart Irrigation System Project Guide
 
-**Last Updated**: 2025-10-18
-**Version**: 2.0.0 - Component-Based Architecture + Phase 5 Ready
-**Current Phase**: ⏳ Phase 5 - Irrigation Control Implementation
+**Last Updated**: 2025-10-18 | **Version**: 2.0.0 | **Phase**: Phase 5 (Ready)
 
----
+## 🔴 CRITICAL: PHASE 5 RULES
 
-## 🔴 CRITICAL: PHASE 5 IMPLEMENTATION RULES (READ FIRST)
-
-### **BEFORE STARTING PHASE 5 - READ THESE**
-
-1. **✅ COMPONENT-BASED ARCHITECTURE MANDATORY**
-   - All new code MUST follow 5 core principles (see ESTADO_ACTUAL_IMPLEMENTACION.md line 49-103)
-   - **SRC**: Single Responsibility per component
-   - **MIS**: Minimal Interface Segregation (small focused APIs)
-   - **DD**: Direct Dependencies (no unnecessary abstraction layers)
-   - **Memory-First**: Static allocation, NO malloc in component logic
-   - **Task-Oriented**: Components are passive (FreeRTOS tasks managed by main)
-
-2. **✅ REFERENCE EXISTING COMPONENTS AS TEMPLATES**
-   - Use `sensor_reader`, `device_config`, `mqtt_client` as architectural reference
-   - All 5 existing components validated and thread-safe - **follow their patterns exactly**
-   - Check `detalles_implementacion_nva_arqutectura.md` for compliance matrix
-
-3. **✅ THREAD-SAFETY IS NON-NEGOTIABLE**
-   - All shared state MUST be protected (portMUX_TYPE spinlock or mutex)
-   - Review `wifi_manager` (lines 79-158) for spinlock implementation examples
-   - See ESTADO_ACTUAL_IMPLEMENTACION.md lines 162-180 for thread-safety patterns
-
-4. **✅ EXECUTION PLAN MANDATORY - DO NOT SKIP**
-   - **FIRST**: Read `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md` completely
-   - **SECOND**: Read `Logica_de_riego.md` for irrigation logic requirements
-   - **THIRD**: Follow the plan step-by-step (never mix multiple tasks)
-
-5. **✅ COMPILATION & BINARY SIZE CONSTRAINTS**
-   - Binary current: 942.80 KB | Max allowed: 1.5 MB | Headroom: 1.14 MB (56% free)
-   - **After irrigation_controller**: Must be < 1.4 MB
-   - Run AFTER every change: `idf.py build && idf.py size-components`
-
-6. **✅ NO PHASE MIXING - GOLDEN RULE**
-   - `irrigation_controller` = **Phase 5 ONLY** (complete it 100%)
-   - `system_monitor` = Phase 5+ (do NOT start until irrigation_controller working)
-   - This rule prevented chaos in Phase 4 - **do not violate it**
-
-7. **✅ DOCUMENTATION UPDATE AFTER EACH STEP - MANDATORY**
-   - After EVERY step in `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md` is completed:
-     1. Update `CLAUDE.md` (first 50 lines) with new status
-     2. Update `ESTADO_ACTUAL_IMPLEMENTACION.md` with detailed changes
-     3. Run: `git status` to verify files changed
-     4. Commit with clear message: `"Phase 5: [step_name] - [what_changed]"`
-   - This keeps documentation in sync with code (prevent information decay)
+1. **COMPONENT-BASED MANDATORY**: SRC, MIS, DD, Memory-First, Task-Oriented (see ESTADO_ACTUAL_IMPLEMENTACION.md)
+2. **REFERENCE TEMPLATES**: sensor_reader, device_config, mqtt_client (thread-safe + validated)
+3. **THREAD-SAFETY**: All shared state protected (spinlock/mutex) - ZERO exceptions
+4. **EXECUTION PLAN**: Read PLAN_EJECUCION_IRRIGATION_CONTROLLER.md first, then Logica_de_riego.md
+5. **BINARY CONSTRAINTS**: Current 942.80 KB | Max 1.5 MB | After irrigation_controller: < 1.4 MB
+6. **NO PHASE MIXING**: irrigation_controller Phase 5 ONLY - complete 100% before system_monitor
+7. **DOCUMENTATION**: Update CLAUDE.md + ESTADO_ACTUAL_IMPLEMENTACION.md + commit after each step
 
 ---
 
@@ -78,80 +39,6 @@
 
 ---
 
-## ✅ ANÁLISIS ARQUITECTURAL COMPLETADO
-
-### **Validación Arquitectural de Componentes Migrados - COMPLETADA**
-
-**Fecha de Validación**: 2025-10-09
-**Documentación Completa**: Ver [ESTADO_ACTUAL_IMPLEMENTACION.md](ESTADO_ACTUAL_IMPLEMENTACION.md) (líneas 55-103)
-
-**Resultado**: ✅ **TODOS los componentes cumplen con Principios Component-Based**
-
-#### **Principios Validados** (según @detalles_implementacion_nva_arqutectura.md):
-
-1. ✅ **Single Responsibility Component (SRC)** - VALIDADO
-   - ✅ sensor_reader: Solo lectura de sensores (DHT22 + ADC)
-   - ✅ device_config: Solo gestión de configuración NVS
-   - ✅ wifi_manager: Solo conectividad WiFi + provisioning
-   - ✅ mqtt_client: Solo comunicación MQTT + WebSockets
-   - ✅ http_server: Solo endpoints HTTP REST
-
-2. ✅ **Minimal Interface Segregation (MIS)** - VALIDADO
-   - ✅ APIs específicas y mínimas por componente
-   - ✅ No hay "god objects" - cada componente expone solo lo necesario
-   - ✅ Interfaces cohesivas y bien definidas
-
-3. ✅ **Direct Dependencies (DD)** - VALIDADO
-   - ✅ Dependencias directas componente-a-componente
-   - ✅ `shared_resource_manager` ELIMINADO (violaba DD/SRC/MIS)
-   - ✅ Sin capas de abstracción innecesarias
-
-4. ✅ **Memory-First Design** - VALIDADO
-   - ✅ Arrays estáticos en lugar de malloc
-   - ✅ Stack allocation para datos temporales
-   - ✅ Thread-safety con mutexes/spinlocks estáticos internos
-
-5. ✅ **Task-Oriented Architecture** - VALIDADO
-   - ✅ Tareas con responsabilidad específica
-   - ✅ Stack sizes optimizados (4KB para sensor_publishing_task)
-   - ✅ Prioridades balanceadas para evitar inversión
-
-#### **Acciones Completadas**:
-
-1. **[x] Revisar sensor_reader** - ✅ APROBADO
-   - ✅ Cumple SRC perfectamente (solo lectura sensores)
-   - ✅ API mínima y específica (7 funciones públicas)
-   - ✅ Dependencias directas (ESP-IDF HAL únicamente)
-   - ✅ Memory-first design (portMUX_TYPE estático)
-
-2. **[x] Revisar device_config** - ✅ APROBADO
-   - ✅ 30+ funciones NO viola MIS (todas cohesivas, mismo dominio)
-   - ✅ NO necesita subdivisión (categorías bien organizadas)
-   - ✅ Thread-safety correcto (mutex interno `s_config_mutex`)
-
-3. **[x] Revisar wifi_manager** - ✅ APROBADO CON MEJORAS (2025-10-09)
-   - ✅ Manejo completo WiFi + provisioning
-   - ✅ Thread-safety MEJORADO: Spinlocks agregados para estado compartido
-   - ⚠️ Tech debt arquitectural documentado (ver sección abajo)
-
-4. **[x] Revisar mqtt_client** - ✅ APROBADO
-   - ✅ MQTT + JSON serialization cohesivo
-   - ✅ Task-based serialization (no concurrencia explícita)
-
-5. **[x] Revisar http_server** - ✅ APROBADO
-   - ✅ Endpoints REST bien definidos
-   - ✅ Thread-safety nativo ESP-IDF httpd
-
-6. **[x] Documentar conclusiones** - ✅ COMPLETADO
-   - Documentado en ESTADO_ACTUAL_IMPLEMENTACION.md
-
-7. **[x] Decisión arquitectural crítica** - ✅ EJECUTADA
-   - Eliminación de `shared_resource_manager` (~6 KB ahorrados)
-   - Thread-safety movido a componentes individuales
-
-**✅ RESULTADO FINAL**: Análisis completado - **PHASE 4 DESBLOQUEADA OFICIALMENTE**
-
----
 
 ## Project Overview
 
@@ -163,58 +50,16 @@ This is a **Smart Irrigation System** IoT project built with **ESP-IDF** for ESP
 **Language**: C (Clean Code for embedded systems)
 **IDE**: Visual Studio Code with ESP-IDF extension
 
-## Project Structure & Architecture
+## Architecture (Component-Based v2.0.0)
 
-### **Current Architecture: Component-Based (v2.0.0)**
-
-```
-smart_irrigation_system/
-├── components/              # ✅ ACTIVE - Component-Based Architecture
-│   ├── wifi_manager/        # WiFi connectivity + provisioning
-│   │   ├── wifi_manager.h
-│   │   ├── wifi_manager.c
-│   │   └── CMakeLists.txt
-│   │
-│   ├── mqtt_client/         # MQTT client + WebSockets (with Kconfig)
-│   │   ├── mqtt_client_manager.h
-│   │   ├── mqtt_adapter.c
-│   │   ├── Kconfig          # NEW: MQTT_BROKER_URI configuration
-│   │   └── CMakeLists.txt
-│   │
-│   ├── sensor_reader/       # Sensor reading unified (DHT22 + ADC)
-│   │   ├── sensor_reader.h
-│   │   ├── sensor_reader.c
-│   │   ├── drivers/
-│   │   │   ├── dht22/       # DHT22 driver
-│   │   │   └── moisture_sensor/  # ADC soil sensors
-│   │   └── CMakeLists.txt
-│   │
-│   ├── http_server/         # HTTP REST endpoints
-│   │   ├── http_server.h
-│   │   ├── http_server.c
-│   │   └── CMakeLists.txt
-│   │
-│   └── device_config/       # NVS configuration
-│       ├── device_config.h
-│       ├── device_config.c
-│       └── CMakeLists.txt
-│
-├── main/                    # Application entry point
-│   ├── iot-soc-smart-irrigation.c  # 100% Component-Based
-│   └── CMakeLists.txt
-│
-├── include/
-│   └── common_types.h       # Shared types across components
-│
-├── future_components/       # Reference/documentation only
-│   └── irrigation_controller/  # 📋 Plan documentado (Phase 5)
-│
-└── docs/                    # Project documentation
-    ├── CLAUDE.md            # This file - Quick reference guide
-    ├── ESTADO_ACTUAL_IMPLEMENTACION.md  # Detailed status
-    ├── PLAN_EJECUCION_IRRIGATION_CONTROLLER.md  # Phase 5 execution plan
-    └── detalles_implementacion_nva_arqutectura.md
-```
+| Component | Purpose | Status | Thread-Safe |
+|-----------|---------|--------|-------------|
+| **sensor_reader** | DHT22 + 3x ADC sensors | ✅ 100% | ✅ portMUX_TYPE |
+| **device_config** | NVS configuration (WiFi, MQTT, Irrigation) | ✅ 100% | ✅ Mutex |
+| **wifi_manager** | WiFi + provisioning + boot counter | ✅ 100% | ✅ 3 spinlocks |
+| **mqtt_client** | MQTT + WebSockets (Kconfig: MQTT_BROKER_URI) | ✅ 100% | ✅ Task-based |
+| **http_server** | REST endpoints (/whoami, /sensors, /ping) | ✅ 100% | ✅ ESP-IDF native |
+| **irrigation_controller** | 📋 Phase 5 (valve control, MQTT commands) | 🔄 TODO | ⏳ Pending |
 
 ## Component-Based Architecture Principles
 
@@ -268,222 +113,22 @@ Each component manages its own thread-safety internally.
 - **Power**: Battery + solar optimized
 - **Real-time**: FreeRTOS-based task management
 
-## Development Phases
+## Development Phases Status
 
-### Phase 1: Basic Infrastructure (CRITICAL)
-**Status**: ✅ COMPLETED
-- WiFi connectivity with reconnection ✅
-- MQTT client over WebSockets ✅
-- Basic HTTP server ✅
-- Semaphore system for concurrency ✅
+| Phase | Status | Key Achievements |
+|-------|--------|-----------------|
+| 1-3 | ✅ COMPLETE | Infrastructure, sensors, MQTT communication |
+| **4** | ✅ **COMPLETE** | Architecture validation, thread-safety 100%, 5 components migrated |
+| **5** | 📋 **READY** | Irrigation controller (see PLAN_EJECUCION_IRRIGATION_CONTROLLER.md) |
+| 6 | ⏳ FUTURE | Optimization, OTA updates, wifi_manager refactoring |
 
-**Current Implementation**:
-- `wifi_adapter/` - WiFi connection management with exponential backoff
-- `mqtt_adapter/` - MQTT client with WebSocket support
-- `http_adapter/` - HTTP server with middleware architecture
-- `shared_resource_manager` - Semaphore coordination system
+### Phase 5: Irrigation Control (NEXT)
+**See**: PLAN_EJECUCION_IRRIGATION_CONTROLLER.md + Logica_de_riego.md
+- Valve control drivers (GPIO/relay)
+- Irrigation state machine + MQTT commands
+- Offline automatic irrigation + safety interlocks
+**Prerequisites**: ✅ All met (architecture validated, thread-safe, binaries OK)
 
-### Phase 2: Data & Sensors (CRITICAL)
-**Status**: ✅ COMPLETED
-- Sensor data structures ✅
-- Sensor abstraction layer ✅
-- Periodic sensor reading task ✅
-
-**Current Implementation**:
-- `domain/value_objects/` - Complete sensor data structures
-- `dht_sensor/` - Environmental sensor driver
-- Domain services for sensor management
-
-### Phase 3: Data Communication (CRITICAL)
-**Status**: ✅ COMPLETED
-- Device registration message ✅
-- MQTT data publishing ✅
-- HTTP endpoints (/whoami, /sensors) ✅
-
-**Current Implementation**:
-- `use_cases/publish_sensor_data` - Data publishing use case
-- `json_device_serializer` - JSON serialization for MQTT/HTTP
-- HTTP endpoints with proper middleware
-
-### Phase 4: Architectural Validation & Compliance (CRITICAL)
-**Status**: ✅ **COMPLETED** (Started 2025-10-09, Completed 2025-10-13)
-**Duration**: 4 days (intermittent work)
-**Objective**: Garantizar que TODOS los componentes cumplan 100% con los 5 principios Component-Based antes de agregar nuevas features
-
-**Context**: Validación arquitectural completa antes de implementar irrigation_controller
-
-**Results Achieved**:
-- ✅ All 5 components analyzed against 5 principles
-- ✅ Compliance matrix documented
-- ✅ 2/5 components ZERO tech debt (sensor_reader, device_config)
-- ✅ 2/5 components minor accepted deviations (mqtt_client, http_server - cJSON malloc)
-- ✅ 1/5 architectural tech debt deferred to Phase 6 (wifi_manager - SRC/MIS/DD)
-- ✅ 100% thread-safety implemented across all components
-- ✅ System READY for Phase 5 (irrigation_controller)
-
----
-
-## **PHASE 4: COMPLETION SUMMARY**
-
-**Detailed Analysis**: Ver [CLAUDE_PHASE4_PLAN.md](CLAUDE_PHASE4_PLAN.md) para análisis completo
-
-### **Compliance Matrix** (5 components × 5 principles):
-
-| Component | SRC | MIS | DD | Memory-First | Task-Oriented | Tech Debt | Status |
-|-----------|-----|-----|----|--------------|--------------|-----------| -------|
-| sensor_reader | ✅ | ✅ | ✅ | ✅ | ✅ | **ZERO** | **✅ 100% COMPLIANT** |
-| device_config | ✅ | ✅ | ✅ | ✅ | ✅ | **ZERO** | **✅ 100% COMPLIANT** |
-| wifi_manager | ❌ | ❌ | ❌ | ✅ | ✅ | **SRC/MIS/DD** (Phase 6) | **✅ Thread-safe** |
-| mqtt_client | ✅ | ✅ | ✅ | ⚠️ | ✅ | **Minor** (cJSON malloc) | **✅ COMPLIANT** |
-| http_server | ✅ | ✅ | ✅ | ⚠️ | ✅ | **Minor** (cJSON malloc) | **✅ COMPLIANT** |
-
-### **Component Analysis Summary**:
-
-#### **4.1: sensor_reader** ✅ **100% COMPLIANT - ZERO TECH DEBT**
-- ✅ SRC: Solo lectura de sensores (DHT22 + ADC) - calibration cohesiva
-- ✅ MIS: 11 funciones justificadas (todas cohesivas y necesarias)
-- ✅ DD: Dependencias directas ESP-IDF HAL únicamente
-- ✅ Memory-First: No malloc, portMUX_TYPE thread-safety
-- ✅ Task-Oriented: Componente pasivo (no tareas propias)
-
-#### **4.2: device_config** ✅ **100% COMPLIANT - ZERO TECH DEBT**
-- ✅ SRC: Gestión de configuración persistente NVS (5 categorías = sub-dominios cohesivos)
-- ✅ MIS: 30 funciones justificadas (MANTENER UNIFICADO es arquitecturalmente superior)
-- ✅ DD: Dependencias directas ESP-IDF HAL (nvs, wifi, mac)
-- ✅ Memory-First: No malloc, static state, mutex thread-safety
-- ✅ Task-Oriented: Componente pasivo (no tareas)
-- **Decision**: Unified component mejor que 5 sub-componentes (1 mutex vs 5, embedded-first design)
-
-#### **4.3: wifi_manager** ✅ **Thread-safe, ⚠️ SRC/MIS/DD deferred to Phase 6**
-- ❌ SRC: 3 responsibilities (WiFi + provisioning + boot counter) - TECH DEBT
-- ❌ MIS: 15 functions (8 core + 7 provisioning/boot) - TECH DEBT
-- ❌ DD: esp_http_server dependency (~17KB overhead) - TECH DEBT
-- ✅ Memory-First: 100% thread-safe (4 spinlocks, 16 functions protected)
-- ✅ Task-Oriented: No custom tasks (ESP-IDF WiFi stack)
-- **Decision**: DEFER refactoring to Phase 6 (system functional and safe for Phase 5)
-
-#### **4.4: mqtt_client** ✅ **COMPLIANT (minor: cJSON malloc accepted)**
-- ✅ SRC: MQTT communication + JSON serialization cohesiva
-- ✅ MIS: 10 funciones mínimas y necesarias
-- ✅ DD: ESP-IDF MQTT client, cJSON (standard)
-- ⚠️ Memory-First: cJSON malloc interno (ESP-IDF library, proper cleanup) - ACCEPTED
-- ✅ Task-Oriented: ESP-IDF MQTT client task nativa
-
-#### **4.5: http_server** ✅ **COMPLIANT (minor: cJSON malloc accepted)**
-- ✅ SRC: REST API endpoints (single responsibility)
-- ✅ MIS: 8 funciones mínimas
-- ✅ DD: ESP-IDF httpd, cJSON (standard)
-- ⚠️ Memory-First: cJSON malloc (same as mqtt_client) - ACCEPTED
-- ✅ Task-Oriented: ESP-IDF httpd task nativa
-
-### **Tech Debt Summary**:
-
-**Tech Debt Crítico (Bloqueante)**: ✅ **NINGUNO**
-
-**Tech Debt Arquitectural (No bloqueante - Phase 6)**:
-- **TD-001**: wifi_manager SRC violation (3 responsibilities) - Effort: 1 day
-- **TD-002**: wifi_manager MIS violation (15 functions mixed) - Resolved with TD-001
-- **TD-003**: wifi_manager DD violation (esp_http_server dependency) - Resolved with TD-001
-
-**Tech Debt Menor (Aceptado)**:
-- **TD-004**: mqtt_client cJSON malloc (ESP-IDF library, proper cleanup) - ACCEPTED
-- **TD-005**: http_server cJSON malloc (same as TD-004) - ACCEPTED
-
-**Total Phase 6 Effort**: 1 day (all wifi_manager issues resolved with single refactoring)
-
----
-
-### Phase 5: Irrigation Control Implementation (NEXT)
-**Status**: 📋 DOCUMENTED - EXECUTION PLAN READY
-**Objective**: Implement valve control and irrigation automation
-
-**Key Documentation**:
-- See `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md` for detailed execution plan
-- See `Logica_de_riego.md` for irrigation logic specifications
-
-**Prerequisites** (All Completed ✅):
-- ✅ Component-based architecture validated and functional
-- ✅ Thread-safety 100% implemented across all 5 components
-- ✅ MQTT client functional with configurable broker (Kconfig)
-- ✅ System compiles successfully (942.80 KB, 56% free)
-- ✅ System stable and demo-ready
-
-**To Start Phase 5**:
-1. Review `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md`
-2. Create `components/irrigation_controller/` component
-3. Implement valve control drivers
-4. Follow component-based principles from Phase 4 validation
-
-**Estimated Duration**: 1-2 days
-
----
-
-### Phase 6: System Optimization & Final Integration (FUTURE)
-**Status**: ⏳ PENDING
-**Objective**: Production-ready system with optimizations
-
-**Tasks**:
-- Memory management & sleep modes
-- Power optimization (battery + solar)
-- Final task scheduling optimization
-- Complete hardware-in-loop integration testing
-- OTA update implementation
-- Architectural refactoring of wifi_manager (separate 3 components)
-- Performance profiling and tuning
-
-**Estimated Duration**: 2-3 days
-
-## API Specifications
-
-### HTTP Endpoints
-- `GET /whoami` - Device information and available endpoints
-- `GET /sensors` - Immediate reading of all sensors
-- `GET /ping` - Health check endpoint
-
-### MQTT Topics
-- `irrigation/register` - Device registration
-- `irrigation/data/{crop_name}/{mac_address}` - Sensor data publishing
-- `irrigation/control/{mac_address}` - Irrigation commands (start/stop)
-
-### Data Formats
-
-#### Device Registration (MQTT)
-```json
-{
-  "event_type": "device_registration",
-  "mac_address": "AA:BB:CC:DD:EE:FF",
-  "ip_address": "192.168.1.100",
-  "device_name": "ESP32_Cultivo_01",
-  "crop_name": "tomates",
-  "firmware_version": "v1.0.0"
-}
-```
-
-#### Sensor Data Publishing (MQTT)
-```json
-{
-  "event_type": "sensor_data",
-  "mac_address": "AA:BB:CC:DD:EE:FF",
-  "ip_address": "192.168.1.100",
-  "ambient_temperature": 25.6,
-  "ambient_humidity": 65.2,
-  "soil_humidity_1": 45.8,
-  "soil_humidity_2": 42.1,
-  "soil_humidity_3": 48.3
-}
-```
-
-#### HTTP Sensor Response
-```json
-{
-  "ambient_temperature": 25.6,
-  "ambient_humidity": 65.2,
-  "soil_humidity_1": 45.8,
-  "soil_humidity_2": 42.1,
-  "soil_humidity_3": 48.3,
-  "timestamp": 1640995200
-}
-```
 
 ## Hardware Configuration
 
@@ -553,157 +198,32 @@ typedef enum {
 4. **Open/Closed**: Easy to extend sensors or communication protocols
 5. **Interface Segregation**: Small, focused interfaces between layers
 
-## Configuration Management
+## API Specifications
 
-### Build Configuration (menuconfig)
-```
-Smart Irrigation Configuration  --->
-    WiFi Configuration  --->
-        (YourWiFiSSID) WiFi SSID
-        (YourPassword) WiFi Password
-        [*] Enable WiFi Auto-Reconnection
-        (30) Initial Reconnection Timeout (seconds)
-        (3600) Maximum Reconnection Interval (seconds)
+**HTTP Endpoints**: `/whoami` (device info), `/sensors` (readings), `/ping` (health check)
+**MQTT Topics**: `irrigation/register`, `irrigation/data/{crop}/{mac}`, `irrigation/control/{mac}`
+**Configuration**: See `menuconfig` (WiFi, MQTT_BROKER_URI via Kconfig, thresholds, intervals)
+**NVS Keys**: `wifi_ssid`, `wifi_pass`, `mqtt_broker`, `device_name`, `crop_name`, `soil_thresh`
 
-    MQTT Configuration  --->
-        [*] Enable MQTT over WebSockets
-        (wss://mqtt.yourdomain.com/mqtt) MQTT Broker URL
-        (1883) MQTT Port
-        (irrigation/register) Registration Topic
-        (irrigation/data) Data Topic Prefix
-        (irrigation/control) Control Topic Prefix
-        (60) Keep Alive Interval (seconds)
+---
 
-    Device Configuration  --->
-        (ESP32_Riego_01) Device Name
-        (tomates) Crop Name
-        (1.0.0) Firmware Version
+## Testing & Deployment
 
-    Sensor Configuration  --->
-        (30) Sensor Reading Interval (seconds)
-        (60) Data Publishing Interval (seconds)
-        [*] Enable DHT22 Environmental Sensor
-        [*] Enable Soil Moisture Sensors
-        (3) Number of Soil Moisture Sensors
-
-    Irrigation Configuration  --->
-        (45) Default Soil Threshold (%)
-        (15) Default Irrigation Duration (minutes)
-        (30) Maximum Irrigation Duration (minutes)
-        [*] Enable Offline Mode
-        (300) Offline Mode Activation Delay (seconds)
-
-    HTTP Server Configuration  --->
-        (80) HTTP Server Port
-        [*] Enable Request Logging
-        (10) Request Timeout (seconds)
+### Quick Test
+```bash
+get_idf && idf.py build && idf.py size-components
+curl http://192.168.1.100/whoami  # Verify device
+curl http://192.168.1.100/sensors # Check sensor data
 ```
 
-### NVS Storage Keys
-```c
-// WiFi Configuration
-#define NVS_KEY_WIFI_SSID           "wifi_ssid"
-#define NVS_KEY_WIFI_PASSWORD       "wifi_pass"
-
-// MQTT Configuration
-#define NVS_KEY_MQTT_BROKER_URL     "mqtt_broker"
-#define NVS_KEY_MQTT_PORT           "mqtt_port"
-
-// Device Configuration
-#define NVS_KEY_DEVICE_NAME         "device_name"
-#define NVS_KEY_CROP_NAME           "crop_name"
-
-// Irrigation Configuration
-#define NVS_KEY_SOIL_THRESHOLD      "soil_thresh"
-#define NVS_KEY_IRRIGATION_DURATION "irrig_dur"
-```
-
-## Testing Strategy
-
-### Unit Tests (Domain Logic)
-```c
-// Test irrigation decision logic
-void test_irrigation_logic_soil_threshold_below(void) {
-    soil_sensor_data_t test_data = {
-        .soil_humidity_1 = 30.0,  // Below threshold (45%)
-        .soil_humidity_2 = 35.0,  // Below threshold
-        .soil_humidity_3 = 40.0,  // Below threshold
-        .timestamp = 1640995200
-    };
-
-    irrigation_decision_t decision = irrigation_logic_evaluate(&test_data);
-    TEST_ASSERT_EQUAL(IRRIGATION_DECISION_START, decision.action);
-    TEST_ASSERT_EQUAL(15, decision.duration_minutes);
-}
-
-void test_sensor_data_validation(void) {
-    ambient_sensor_data_t invalid_data = {
-        .temperature = -50.0,  // Invalid temperature
-        .humidity = 150.0      // Invalid humidity
-    };
-
-    bool is_valid = sensor_manager_validate_environmental_data(&invalid_data);
-    TEST_ASSERT_FALSE(is_valid);
-}
-```
-
-### Integration Tests (Component Interaction)
-```c
-// Test complete sensor-to-MQTT flow
-void test_sensor_data_publishing_integration(void) {
-    // Initialize components
-    sensor_manager_init();
-    mqtt_adapter_init();
-
-    // Mock sensor readings
-    sensor_manager_set_mock_data(25.5, 60.0, 45.0, 42.0, 48.0);
-
-    // Execute publishing use case
-    esp_err_t result = publish_sensor_data_use_case_execute();
-    TEST_ASSERT_EQUAL(ESP_OK, result);
-
-    // Verify MQTT publication
-    const char* expected_topic = "irrigation/data/tomates/AA:BB:CC:DD:EE:FF";
-    TEST_ASSERT_TRUE(mqtt_adapter_was_topic_published(expected_topic));
-}
-
-// Test HTTP endpoint responses
-void test_http_whoami_endpoint(void) {
-    http_server_init();
-
-    http_response_t response = http_test_client_get("/whoami");
-    TEST_ASSERT_EQUAL(200, response.status_code);
-    TEST_ASSERT_TRUE(response.body_contains("ESP32_Riego_01"));
-    TEST_ASSERT_TRUE(response.body_contains("tomates"));
-}
-```
-
-### Hardware-in-Loop Testing
-```c
-// Real sensor integration tests
-void test_dht22_sensor_reading(void) {
-    dht_sensor_init(DHT22_DATA_GPIO);
-
-    ambient_sensor_data_t data;
-    esp_err_t result = dht_sensor_read(&data);
-    TEST_ASSERT_EQUAL(ESP_OK, result);
-
-    // Validate reasonable ranges for field conditions
-    TEST_ASSERT_TRUE(data.temperature >= -10.0 && data.temperature <= 60.0);
-    TEST_ASSERT_TRUE(data.humidity >= 0.0 && data.humidity <= 100.0);
-}
-
-void test_soil_moisture_adc_reading(void) {
-    soil_moisture_sensor_init();
-
-    soil_sensor_data_t data;
-    esp_err_t result = soil_moisture_sensor_read_all(&data);
-    TEST_ASSERT_EQUAL(ESP_OK, result);
-
-    // Validate ADC readings convert to reasonable percentages
-    TEST_ASSERT_TRUE(data.soil_humidity_1 >= 0.0 && data.soil_humidity_1 <= 100.0);
-}
-```
+### Deployment Checklist
+1. Configure WiFi + MQTT broker (menuconfig)
+2. Calibrate soil moisture sensors (dry/wet)
+3. Test irrigation valve response
+4. Verify MQTT connectivity
+5. Configure thresholds (45% default soil)
+6. Test offline mode
+7. Install in IP65 enclosure
 
 ## Performance Expectations
 
@@ -726,425 +246,35 @@ void test_soil_moisture_adc_reading(void) {
 - **MQTT Keep-Alive**: 60 seconds with QoS 1 for reliability
 - **Offline Mode**: Automatic activation after 300 seconds without connectivity
 
-## Troubleshooting Guide
+---
 
-### Common Issues & Solutions
+## Debug Commands
 
-#### WiFi Connection Problems
-```c
-// Debug WiFi connection status
-wifi_ap_record_t ap_info;
-esp_wifi_sta_get_ap_info(&ap_info);
-ESP_LOGI(TAG, "Connected to AP: %s, RSSI: %d", ap_info.ssid, ap_info.rssi);
-
-// Check signal strength
-if (ap_info.rssi < -70) {
-    ESP_LOGW(TAG, "Weak WiFi signal - consider repositioning device");
-}
-```
-
-#### MQTT Connection Issues
-```c
-// Verify MQTT broker connectivity
-if (mqtt_adapter_get_connection_state() == MQTT_DISCONNECTED) {
-    ESP_LOGI(TAG, "MQTT disconnected - checking WebSocket support");
-    // Enable offline mode for irrigation safety
-    irrigation_logic_enable_offline_mode();
-}
-```
-
-#### Sensor Reading Errors
-```c
-// DHT22 sensor debugging
-esp_err_t sensor_result = dht_sensor_read(&ambient_data);
-if (sensor_result == ESP_ERR_TIMEOUT) {
-    ESP_LOGE(TAG, "DHT22 timeout - check wiring and power");
-} else if (sensor_result == ESP_ERR_INVALID_CRC) {
-    ESP_LOGE(TAG, "DHT22 CRC error - electromagnetic interference");
-}
-
-// Soil moisture sensor calibration
-float soil_raw_voltage = adc1_get_raw(SOIL_MOISTURE_1_ADC) * (3.3 / 4095.0);
-ESP_LOGI(TAG, "Soil sensor 1 raw voltage: %.2fV", soil_raw_voltage);
-```
-
-#### Memory Issues
-```c
-// Monitor heap usage
-size_t free_heap = esp_get_free_heap_size();
-size_t min_free_heap = esp_get_minimum_free_heap_size();
-ESP_LOGI(TAG, "Free heap: %u bytes, Minimum: %u bytes", free_heap, min_free_heap);
-
-if (free_heap < 50000) {  // 50KB threshold
-    ESP_LOGW(TAG, "Low memory - consider reducing buffer sizes");
-}
-```
-
-### Debug Tools & Commands
 ```bash
-# Acitviar framework idf
-get_idf
-# Real-time monitoring with sensor data
-idf.py monitor --print_filter="*:I sensor_*:D irrigation_*:D"
-
-# Memory usage analysis
-idf.py size
-
-# Partition table analysis
-idf.py partition_table
-
-# Core dump analysis (configure in menuconfig first)
-idf.py monitor
-# After crash, extract core dump:
-idf.py coredump-info build/smart_irrigation.elf /dev/ttyUSB0
-
-# Flash memory analysis
-idf.py app-flash-info
+get_idf                    # Activate ESP-IDF
+idf.py build              # Build project
+idf.py size-components    # Check binary size
+idf.py monitor            # Monitor output
+idf.py menuconfig         # Configure project
 ```
-
-### Field Diagnostic Endpoints
-```bash
-# Device health check
-curl http://192.168.1.100/whoami
-
-# Real-time sensor readings
-curl http://192.168.1.100/sensors
-
-# Network connectivity test
-curl http://192.168.1.100/ping
-```
-
-## Deployment Considerations
-
-### Hardware Requirements
-- **Microcontroller**: ESP32 DevKit with 4MB flash (38-pin recommended)
-- **Environmental Sensor**: DHT22 (temperature/humidity)
-- **Soil Sensors**: Capacitive soil moisture sensors (1-3 units)
-- **Irrigation Control**: 5V relay module (1-3 channels)
-- **Valves**: 12V/24V solenoid valves
-- **Power Supply**: 12V/5A with battery backup and solar panel
-- **Enclosure**: IP65 waterproof enclosure for outdoor installation
-
-### Network Requirements
-- **WiFi Access Point**: 2.4GHz, WPA2/WPA3 security
-- **Internet Connectivity**: Stable broadband for MQTT broker access
-- **MQTT Broker**: Supporting WebSockets (port 1883 or 8083)
-- **Bandwidth**: Minimal - ~1KB/minute data transmission
-
-### Field Installation
-```c
-// Pre-deployment checklist
-#define DEPLOYMENT_CHECKLIST \
-    "1. Configure WiFi credentials via menuconfig\n" \
-    "2. Set device name and crop type\n" \
-    "3. Calibrate soil moisture sensors (dry/wet)\n" \
-    "4. Test irrigation valve response\n" \
-    "5. Verify MQTT broker connectivity\n" \
-    "6. Configure irrigation thresholds\n" \
-    "7. Test offline mode functionality\n" \
-    "8. Install in weatherproof enclosure\n" \
-    "9. Connect power and backup systems\n" \
-    "10. Monitor operation for 24 hours"
-```
-
-### Remote Monitoring Setup
-- **MQTT Broker**: Cloud-hosted or local server
-- **Dashboard**: Real-time sensor monitoring
-- **Alerts**: Low battery, connectivity issues, sensor failures
-- **Firmware Updates**: Manual flashing via USB (OTA postponed to Phase 5)
-
-## Getting Started for Developers
-
-### Development Environment Setup
-```bash
-# 1. Install ESP-IDF v5.4.2
-git clone -b v5.4.2 --recursive https://github.com/espressif/esp-idf.git
-cd esp-idf && ./install.sh && . ./export.sh
-
-# 2. Clone project repository
-git clone https://github.com/liwaisi-tech/iot-soc-smart-irrigation.git
-cd iot-soc-smart-irrigation
-
-# 3. Configure project
-idf.py menuconfig
-
-# 4. Build and flash
-Get_idf
-idf.py build flash monitor
-```
-
-### AI Assistant Integration
-For AI-assisted development, use the specialized agent prompt:
-```
-# Use this agent prompt for development assistance:
-File: esp32_smart_irrigation_agent_prompt.md
-
-# This agent understands:
-- Hexagonal architecture patterns for ESP32
-- Domain-driven design for IoT systems
-- Project-specific sensor integration
-- Rural deployment considerations
-- Clean code practices for embedded C
-```
-
-### Development Workflow
-1. **Understand Architecture**: Study hexagonal layer separation
-2. **Follow Phases**: Implement according to development phases
-3. **Domain-First**: Start with business logic, then application, then infrastructure
-4. **Test Incrementally**: Unit tests → integration tests → hardware validation
-5. **Document Changes**: Update this guide when adding features
-
-### Code Quality Standards
-- **Functions**: Max 20 lines, single responsibility
-- **Variables**: Descriptive names with project context
-- **Comments**: Explain business rules and safety considerations
-- **Error Handling**: Always check return values, log appropriately
-- **Memory Management**: Zero leaks, proper resource cleanup
 
 ---
 
 ## Project Status Summary
 
-**Version**: 2.0.0 (Component-Based Architecture)
-**Last Updated**: 2025-10-18 (Phase 4 Final - MQTT Kconfig + Validation Complete)
-**Maintainer**: Liwaisi Tech Team
-**License**: MIT
+| Item | Status | Details |
+|------|--------|---------|
+| **Version** | 2.0.0 | Component-Based Architecture |
+| **Phase** | ✅ 4 Complete, 5 Ready | Next: irrigation_controller |
+| **Architecture** | ✅ 100% | Component-based in `/components/` |
+| **Thread-Safety** | ✅ 100% | All 5 components protected |
+| **Binary** | 942.80 KB | 56% free (1.14 MB available) |
+| **Compilation** | ✅ No errors | 5/5 components migrated |
 
-**Current Phase**: ✅ Phase 4 COMPLETED (Oct 13-18) - Architectural Validation & Thread-Safety + MQTT Config
-**Next Phase**: Phase 5 - Irrigation Control Implementation (see PLAN_EJECUCION_IRRIGATION_CONTROLLER.md)
-**Migration Status**: ✅ COMPLETED - Component-Based Architecture (100%) in `/components/`
-**Thread-Safety Status**: ✅ COMPLETED - 100% thread-safe across all 5 components
-**Flash Configuration**: 4MB (No OTA support - Manual USB updates)
-**Binary Size**: 942.80 KB (56% free partition space = 1.14 MB available)
-**Latest Update**: Oct 18 - MQTT Kconfig added for MQTT_BROKER_URI configuration
-**System Status**: ✅ **DEMO-READY & PRODUCTION-READY** - Arquitectura validada, thread-safe, compiles sin errores
-**Ready for**: Phase 5 implementation (irrigation control with safety interlocks)
+**Key Achievements (Oct 18)**:
+- ✅ Component-based architecture fully migrated
+- ✅ Thread-safety 100% (spinlocks + mutexes)
+- ✅ MQTT configurable via Kconfig
+- ✅ system_monitor Phase 6 - documentation complete
 
-The codebase has successfully **migrated from Hexagonal to Component-Based Architecture** with thread-safety 100% implemented across all 5 components. MQTT client now configurable via Kconfig. **Phase 4 completed** with comprehensive validation and final adjustments (Oct 18). **Phase 5 ready to start** for irrigation control features with offline mode safety prioritized for rural reliability. See `PLAN_EJECUCION_IRRIGATION_CONTROLLER.md` for execution plan. **OTA updates postponed to Phase 6** - current deployment requires USB connection for firmware updates.
-
-### Migration & Optimization Results (v2.0.0) - PHASE 4 COMPLETED (Oct 18)
-
-**Migration Status**: ✅ 100% Component-Based Architecture (in `/components/`)
-**Thread-Safety Status**: ✅ 100% Implemented (all 5 components - Oct 9-13)
-**Architectural Validation**: ✅ All 5 principles validated (Oct 13)
-**MQTT Configuration**: ✅ Kconfig added (Oct 18) - MQTT_BROKER_URI configurable
-**Total Components Migrated**: 5/5 (wifi_manager, mqtt_client, http_server, device_config, sensor_reader)
-**Critical Functionality**: ✅ All maintained and improved
-
-| Component | Status | Thread-Safety | Configuration | Notes |
-|-----------|--------|---|---|-------|
-| wifi_manager | ✅ Migrated + Enhanced | ✅ **100% Complete** | - | WiFi + provisioning + 4 spinlocks |
-| mqtt_client | ✅ Migrated + Config | ✅ Task-based | **Kconfig (Oct 18)** | MQTT_BROKER_URI configurable |
-| http_server | ✅ Migrated | ✅ ESP-IDF native | - | REST endpoints |
-| sensor_reader | ✅ Migrated | ✅ portMUX_TYPE | - | DHT22 + 3 ADC sensors |
-| device_config | ✅ Migrated | ✅ Mutex interno | - | NVS + WiFi + MQTT + Irrigation configs |
-| main.c | ✅ Updated | N/A | - | 100% Component-Based orchestration |
-| **Binary** | **942.80 KB** | ✅ **100% Safe** | - | **56% free (1.14 MB available)** |
-
-**Key Achievements Phase 1-4**:
-- ✅ Eliminated `shared_resource_manager` (~6 KB saved, better encapsulation)
-- ✅ Thread-safety 100% implemented across all 5 components
-- ✅ Direct dependencies (no excessive abstraction layers)
-- ✅ Memory-first design validated across all components
-- ✅ **wifi_manager fully thread-safe** (Phase 4): 16 functions/handlers with spinlocks
-- ✅ **mqtt_client configurable** (Oct 18): Broker URI via Kconfig (mqtt://, ws://, wss://)
-- ✅ Race conditions ELIMINATED
-- ✅ System compiling without errors (< 1KB overhead from thread-safety)
-
-**Available Space for Phase 5**: 1.14 MB free (56%) for irrigation_controller, valve drivers, and offline logic
-
----
-
-## ✅ PHASE 4 COMPLETED - SYSTEM DEMO-READY
-
-**Completion Date**: 2025-10-09
-**Duration**: ~2 hours
-**Status**: ✅ **DEMO-READY FOR VIDEO**
-
-### Achievements ✅
-
-1. ✅ **Migration**: 100% component-based architecture implemented
-2. ✅ **Validation**: All 5 architectural principles validated
-3. ✅ **Thread-Safety**: 100% implemented - wifi_manager fully protected
-4. ✅ **Compilation**: System builds successfully (926 KB, 56% free)
-5. ✅ **Documentation**: CLAUDE.md + ESTADO_ACTUAL_IMPLEMENTACION.md updated
-6. ✅ **Race Conditions**: ELIMINATED - all shared state protected
-
-### Phase 4 Highlights
-
-**wifi_manager Thread-Safety Completion**:
-- 3 spinlocks added (`s_manager_status_spinlock`, `s_conn_manager_spinlock`, `s_prov_manager_spinlock`)
-- 7 public API functions protected (read operations)
-- 3 event handlers protected (write operations)
-- 6 init/deinit/management functions protected
-- **Total**: 16 functions/handlers with critical sections
-- **Overhead**: < 1KB Flash
-
-**System Quality**:
-- ✅ No compilation errors
-- ✅ 2 minor warnings (unused functions - non-blocking)
-- ✅ Binary: 926 KB (56% free)
-- ✅ Thread-safe architecture validated
-- ✅ Ready for demonstration/video
-
----
-
-## 🚀 PHASE 5 READY TO START (POST-VIDEO)
-
-**Objective**: Implement irrigation controller
-
-### Prerequisites Completed ✅
-
-1. ✅ **Architecture**: Component-based validated
-2. ✅ **Thread-Safety**: 100% implemented
-3. ✅ **System Stability**: Compiling without errors
-4. ✅ **Documentation**: Up to date
-
-### Ready to Implement (Phase 5)
-
-**irrigation_controller** component:
-- Valve control drivers (GPIO/relay)
-- Irrigation state machine
-- MQTT command subscription
-- Offline automatic irrigation logic
-- Safety interlocks
-
-**Development Approach**:
-1. Follow component-based principles validated in migration
-2. Use sensor_reader, mqtt_client, device_config as reference
-3. Implement thread-safety internally (spinlocks/mutexes)
-4. Test incrementally with hardware-in-loop
-
----
-
-## 🔧 Technical Debt (Pendiente Phase 6)
-
-### wifi_manager Component - Architectural Improvements
-
-**Status**: ⏳ Postponed to Phase 6 (Optimization)
-**Priority**: Medium
-**Effort**: 1 day
-**Last Update**: 2025-10-09
-
-#### Identified Issues (Análisis Arquitectural 2025-10-09)
-
-**1. SRC Violation**: Component has 3 responsibilities
-   - ✅ WiFi connection management (core)
-   - ⚠️ Web-based provisioning (HTTP server + 4KB HTML)
-   - ⚠️ Boot counter (factory reset pattern detection)
-
-**2. DD Violation**: Unnecessary dependencies
-   - `esp_http_server` (~17KB overhead) - only for provisioning
-   - `soc/rtc.h` - only for boot counter
-   - Impact: +17-22KB Flash overhead for non-core functionality
-
-**3. MIS Violation**: API mixes concerns
-   - 15 public functions (8 core WiFi + 7 provisioning/boot)
-   - Provisioning functions should be separate component
-
-#### Proposed Refactoring (Phase 6)
-
-Separate into 3 independent components:
-
-```
-components_new/
-├── wifi_manager/         # Core WiFi connection only
-│   ├── wifi_manager.h    # 8 functions (init, connect, disconnect, etc.)
-│   └── wifi_manager.c    # ~400 lines (vs 1612 actual)
-│
-├── wifi_provisioning/    # NEW - Web provisioning
-│   ├── wifi_provisioning.h
-│   ├── wifi_provisioning.c
-│   └── html/
-│       └── config_page.h
-│
-└── boot_counter/         # NEW - Factory reset pattern
-    ├── boot_counter.h
-    └── boot_counter.c
-```
-
-#### Current Mitigation (Phase 4) ✅
-
-**Thread-safety improvements applied (2025-10-09)**:
-- ✅ Added `portMUX_TYPE` spinlocks for all shared state:
-  - `s_manager_status_spinlock` - Protects manager status
-  - `s_conn_manager_spinlock` - Protects connection state
-  - `s_prov_manager_spinlock` - Protects provisioning state
-- ✅ Protected all public API read functions:
-  - `wifi_manager_get_status()`
-  - `wifi_manager_is_provisioned()`
-  - `wifi_manager_is_connected()`
-  - `wifi_manager_get_ip()`
-  - `wifi_manager_get_mac()`
-  - `wifi_manager_get_ssid()`
-  - `wifi_manager_get_state()`
-- ✅ Eliminates race conditions between event handlers and API calls
-- ✅ Component is now SAFE for concurrent access
-
-**Pending work (Phase 6)**:
-- ✅ ~~Protect event handlers~~ - COMPLETADO Phase 4
-- ✅ ~~Protect init/start/stop/deinit~~ - COMPLETADO Phase 4
-- ⏳ Refactor into 3 separate components (architectural optimization)
-
-#### Benefits of Full Refactoring (Phase 6)
-
-- **Flash Savings**: ~17KB reduction if provisioning excluded in production
-- **Testability**: Independent components easier to test
-- **Maintainability**: Better separation of concerns
-- **Cleaner Dependencies**: Core WiFi manager has minimal deps
-
-#### Decision Rationale
-
-**Why postpone to Phase 6?**
-1. ✅ Phase 4 COMPLETED - Thread-safety 100% implemented
-2. ✅ Critical thread-safety implemented (race conditions ELIMINATED)
-3. ✅ Component is functional and safe for Phase 5 development (irrigation controller)
-4. ⏳ Full refactoring is optimization work (fits Phase 6 scope)
-5. ⏳ No bugs reported - architectural violations are technical debt, not blockers
-
-**Trade-off accepted**:
-- ❌ SRC/DD/MIS violations persist temporarily (not blocking)
-- ✅ System is 100% SAFE for concurrency (COMPLETED Phase 4)
-- ✅ Phase 5 (irrigation) can proceed without delays
-- ✅ Refactoring planned and documented for Phase 6 (not forgotten)
-
----
-
-## 📋 Work Summary - wifi_manager Thread-Safety (Phase 4)
-
-### ✅ COMPLETED (2025-10-09) - Phase 4
-
-#### Thread-Safety Implementation ✅
-- [x] Thread-safety analysis completed
-- [x] 3 spinlocks added for shared structures
-  - `s_manager_status_spinlock`
-  - `s_conn_manager_spinlock`
-  - `s_prov_manager_spinlock`
-- [x] 7 public API read functions protected
-- [x] 3 event handlers protected (write operations):
-  - [x] `connection_event_handler()` - WiFi/IP events
-  - [x] `wifi_manager_provisioning_event_handler()` - Provisioning events
-  - [x] `wifi_manager_connection_event_handler()` - Connection status
-- [x] 6 init/deinit/management functions protected:
-  - [x] `wifi_manager_init()`
-  - [x] `wifi_manager_stop()`
-  - [x] `wifi_manager_check_and_connect()`
-  - [x] `wifi_manager_force_provisioning()`
-  - [x] `wifi_manager_reset_credentials()`
-  - [x] `wifi_manager_clear_all_credentials()`
-- [x] System compiled and validated (926 KB, 56% free)
-- [x] Documentation updated (CLAUDE.md + ESTADO_ACTUAL_IMPLEMENTACION.md)
-
-**Total Protected**: 16 functions/handlers with critical sections
-**Overhead**: < 1KB Flash
-**Status**: ✅ **100% Thread-Safe**
-
-### ⏳ Pending (Phase 6 - Optimization)
-- [ ] Full architectural refactoring (3 components: wifi_manager, wifi_provisioning, boot_counter)
-- [ ] Eliminate SRC/DD/MIS violations
-
-**Estimated Effort**: 1 day (refactoring Phase 6)
-
----
-
-**This project represents critical infrastructure for rural farmers. Every design decision prioritizes reliability, maintainability, and performance under challenging field conditions.**
+**Tech Debt**: wifi_manager refactoring deferred to Phase 6 (non-blocking)
