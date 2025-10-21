@@ -1,0 +1,763 @@
+/**
+ * @file irrigation_controller.c
+ * @brief Irrigation Controller Implementation - Main logic and state machine
+ *
+ * Core irrigation control system with state machine, safety checks,
+ * and integration with other components.
+ *
+ * Phase 5 STUBS: Framework for implementation
+ * Provides structure, logging, and basic state management
+ * Ready for Phase 2 implementation of state handlers
+ *
+ * @author Liwaisi Tech
+ * @date 2025-10-21
+ * @version 1.0.0 - Phase 5 (Structure + Stubs)
+ */
+
+#include "irrigation_controller.h"
+#include "drivers/valve_driver/valve_driver.h"
+#include "drivers/safety_watchdog/safety_watchdog.h"
+#include "sensor_reader.h"
+#include "wifi_manager.h"
+#include "esp_log.h"
+#include "esp_http_client.h"
+#include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/portmacro.h"
+#include <time.h>
+#include <string.h>
+#include <inttypes.h>
+
+/* ============================ PRIVATE TYPES ============================ */
+
+/**
+ * @brief Internal irrigation controller context
+ *
+ * Maintains complete state of irrigation system
+ */
+typedef struct {
+    // Configuration
+    irrigation_controller_config_t config;
+
+    // Current session state
+    irrigation_state_t current_state;
+    irrigation_mode_t current_mode;
+    time_t session_start_time;
+    time_t last_session_end_time;
+    uint16_t current_session_duration_min;
+    bool is_valve_open;
+    uint8_t active_valve_num;
+
+    // MQTT override
+    bool mqtt_override_active;
+    char mqtt_override_command[20];
+    time_t mqtt_override_start_time;
+
+    // Statistics
+    uint32_t session_count;
+    uint32_t total_runtime_today_sec;
+
+    // Online/offline detection
+    bool is_online;
+    time_t last_online_check;
+
+    // Safety
+    bool safety_lock;
+    bool thermal_protection_active;
+    time_t next_allowed_session;
+
+    // Last evaluation
+    irrigation_evaluation_t last_evaluation;
+    time_t last_eval_time;
+} irrigation_controller_context_t;
+
+/* ============================ PRIVATE STATE ============================ */
+
+static const char *TAG = "irrigation_controller";
+
+/**
+ * @brief Global irrigation controller context
+ */
+static irrigation_controller_context_t s_irrig_ctx = {
+    .current_state = IRRIGATION_IDLE,
+    .current_mode = IRRIGATION_MODE_ONLINE,
+    .is_valve_open = false,
+    .active_valve_num = 0,
+    .mqtt_override_active = false,
+    .session_count = 0,
+    .total_runtime_today_sec = 0,
+    .is_online = false,
+    .safety_lock = false,
+    .thermal_protection_active = false
+};
+
+/**
+ * @brief Task handle for irrigation evaluation task
+ */
+static TaskHandle_t s_irrigation_task_handle = NULL;
+
+/**
+ * @brief Spinlock for thread-safe state access
+ */
+static portMUX_TYPE s_irrigation_spinlock = portMUX_INITIALIZER_UNLOCKED;
+
+/**
+ * @brief Initialization flag
+ */
+static bool is_initialized = false;
+
+/* ============================ PRIVATE FUNCTIONS ============================ */
+
+// Forward declarations for state handlers
+static void irrigation_state_idle_handler(const sensor_reading_t* reading);
+static void irrigation_state_running_handler(const sensor_reading_t* reading);
+static void irrigation_state_error_handler(const sensor_reading_t* reading);
+static void irrigation_state_thermal_stop_handler(const sensor_reading_t* reading);
+
+/**
+ * @brief Irrigation evaluation task
+ *
+ * Main task loop for periodic irrigation evaluation.
+ * Runs every 60 seconds in online mode, 2 hours in offline mode.
+ * Implements complete state machine with sensor integration.
+ */
+static void irrigation_evaluation_task(void *param)
+{
+    ESP_LOGI(TAG, "Irrigation evaluation task started");
+
+    while (1) {
+        // 1. Detect connectivity status
+        bool is_online = wifi_manager_is_connected();
+
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            s_irrig_ctx.is_online = is_online;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+        // 2. Read sensors
+        sensor_reading_t reading;
+        esp_err_t sensor_ret = sensor_reader_get_all(&reading);
+
+        if (sensor_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Sensor read failed: %s", esp_err_to_name(sensor_ret));
+            portENTER_CRITICAL(&s_irrigation_spinlock);
+            {
+                s_irrig_ctx.current_state = IRRIGATION_ERROR;
+            }
+            portEXIT_CRITICAL(&s_irrigation_spinlock);
+            irrigation_state_error_handler(NULL);
+        } else {
+            // 3. Execute state machine
+            irrigation_state_t current_state;
+            portENTER_CRITICAL(&s_irrigation_spinlock);
+            {
+                current_state = s_irrig_ctx.current_state;
+            }
+            portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+            switch (current_state) {
+                case IRRIGATION_IDLE:
+                    irrigation_state_idle_handler(&reading);
+                    break;
+
+                case IRRIGATION_ACTIVE:
+                    irrigation_state_running_handler(&reading);
+                    break;
+
+                case IRRIGATION_ERROR:
+                    irrigation_state_error_handler(&reading);
+                    break;
+
+                case IRRIGATION_THERMAL_PROTECTION:
+                    irrigation_state_thermal_stop_handler(&reading);
+                    break;
+
+                case IRRIGATION_EMERGENCY_STOP:
+                    // Emergency stop requires manual unlock
+                    ESP_LOGW(TAG, "EMERGENCY_STOP state - waiting for manual unlock");
+                    break;
+
+                default:
+                    ESP_LOGW(TAG, "Unknown state: %d", current_state);
+                    break;
+            }
+        }
+
+        // 4. Determine evaluation interval based on connectivity
+        uint32_t eval_interval_ms;
+        if (is_online) {
+            eval_interval_ms = 60000;  // 60 seconds online
+            ESP_LOGD(TAG, "Online mode - next evaluation in 60s");
+        } else {
+            eval_interval_ms = 7200000;  // 2 hours offline (Phase 5 fixed interval)
+            ESP_LOGD(TAG, "Offline mode - next evaluation in 2h");
+        }
+
+        // 5. Log summary
+        ESP_LOGD(TAG, "Evaluation cycle: State=%d, Valve=%s, Online=%d, NextWait=%lums",
+                 s_irrig_ctx.current_state,
+                 s_irrig_ctx.is_valve_open ? "OPEN" : "CLOSED",
+                 is_online,
+                 eval_interval_ms);
+
+        // 6. Wait for next evaluation
+        vTaskDelay(pdMS_TO_TICKS(eval_interval_ms));
+    }
+}
+
+/**
+ * @brief Get default configuration
+ *
+ * Returns default configuration using common_types constants
+ */
+static irrigation_controller_config_t _get_default_config(void)
+{
+    return (irrigation_controller_config_t){
+        .soil_threshold_critical = THRESHOLD_SOIL_CRITICAL,
+        .soil_threshold_optimal = THRESHOLD_SOIL_OPTIMAL,
+        .soil_threshold_max = THRESHOLD_SOIL_MAX,
+        .temp_critical = THRESHOLD_TEMP_CRITICAL,
+        .temp_thermal_stop = THRESHOLD_TEMP_THERMAL_STOP,
+        .max_duration_minutes = MAX_IRRIGATION_DURATION_MIN,
+        .min_interval_minutes = MIN_IRRIGATION_INTERVAL_MIN,
+        .max_daily_minutes = MAX_DAILY_IRRIGATION_MIN,
+        .valve_gpio_1 = GPIO_VALVE_1,
+        .valve_gpio_2 = GPIO_VALVE_2,
+        .primary_valve = 1,
+        .enable_offline_mode = true,
+        .offline_timeout_seconds = 300,
+        .offline_warning_threshold = 50.0f,
+        .offline_critical_threshold = 40.0f,
+        .offline_emergency_threshold = 30.0f
+    };
+}
+
+/**
+ * @brief Send N8N webhook for irrigation event
+ *
+ * Sends HTTP POST to N8N with event data
+ */
+static void send_n8n_webhook(const char* event_type,
+                             float soil_moisture_prom,
+                             float humidity,
+                             float temperature)
+{
+    if (event_type == NULL) {
+        return;
+    }
+
+    // Build JSON payload
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "event_type", event_type);
+    cJSON_AddStringToObject(root, "device_id", "ESP32_HUERTA_001");
+
+    cJSON* sensor_data = cJSON_CreateObject();
+    cJSON_AddNumberToObject(sensor_data, "soil_moisture_prom", soil_moisture_prom);
+    cJSON_AddNumberToObject(sensor_data, "humidity", humidity);
+    cJSON_AddNumberToObject(sensor_data, "temperature", temperature);
+    cJSON_AddItemToObject(root, "sensor_data", sensor_data);
+
+    char* json_str = cJSON_Print(root);
+    cJSON_Delete(root);
+
+    if (json_str == NULL) {
+        ESP_LOGE(TAG, "Failed to serialize JSON for N8N webhook");
+        return;
+    }
+
+    // Create HTTP client
+    esp_http_client_config_t config = {
+        .url = "http://192.168.1.41:5678/webhook-test/irrigation-events",
+        .method = HTTP_METHOD_POST,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Failed to create HTTP client for N8N webhook");
+        free(json_str);
+        return;
+    }
+
+    // Set headers
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "X-API-Key", "d1b4873f5144c6db6c87f03109010c314a7fb9edf3052f4f478bb2d967181427");
+
+    // Set request body
+    esp_http_client_set_post_field(client, json_str, strlen(json_str));
+
+    // Perform request
+    esp_err_t ret = esp_http_client_perform(client);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(ret));
+    } else {
+        int status_code = esp_http_client_get_status_code(client);
+        ESP_LOGI(TAG, "N8N webhook sent: %s (HTTP %d)", event_type, status_code);
+    }
+
+    esp_http_client_cleanup(client);
+    free(json_str);
+}
+
+/**
+ * @brief State handler: IDLE
+ *
+ * Evaluates if riego should start based on soil moisture
+ */
+static void irrigation_state_idle_handler(const sensor_reading_t* reading)
+{
+    if (reading == NULL) {
+        return;
+    }
+
+    // Calculate average soil moisture from 3 sensors
+    float soil_avg = (reading->soil.soil_humidity[0] +
+                      reading->soil.soil_humidity[1] +
+                      reading->soil.soil_humidity[2]) / 3.0f;
+
+    ESP_LOGD(TAG, "IDLE state: soil_avg=%.1f%% (start threshold=%.1f%%)",
+             soil_avg, s_irrig_ctx.config.soil_threshold_critical);
+
+    // Check if should start irrigation
+    if (soil_avg < s_irrig_ctx.config.soil_threshold_critical) {
+        ESP_LOGI(TAG, "Soil too dry (%.1f%% < %.1f%%) - starting irrigation",
+                 soil_avg, s_irrig_ctx.config.soil_threshold_critical);
+
+        // Open valve
+        valve_driver_open(s_irrig_ctx.config.primary_valve);
+
+        // Update state
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            s_irrig_ctx.is_valve_open = true;
+            s_irrig_ctx.active_valve_num = s_irrig_ctx.config.primary_valve;
+            s_irrig_ctx.session_start_time = time(NULL);
+            s_irrig_ctx.current_state = IRRIGATION_ACTIVE;
+            s_irrig_ctx.session_count++;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+        // Reset watchdog timers
+        safety_watchdog_reset_session();
+        safety_watchdog_reset_valve_timer();
+
+        // Send webhook
+        send_n8n_webhook("irrigation_on", soil_avg,
+                        reading->ambient.humidity,
+                        reading->ambient.temperature);
+    }
+}
+
+/**
+ * @brief State handler: ACTIVE (running irrigation)
+ *
+ * Monitors running irrigation and decides when to stop
+ */
+static void irrigation_state_running_handler(const sensor_reading_t* reading)
+{
+    if (reading == NULL) {
+        return;
+    }
+
+    // Calculate soil average
+    float soil_avg = (reading->soil.soil_humidity[0] +
+                      reading->soil.soil_humidity[1] +
+                      reading->soil.soil_humidity[2]) / 3.0f;
+
+    // Find maximum (any sensor too wet?)
+    float soil_max = reading->soil.soil_humidity[0];
+    if (reading->soil.soil_humidity[1] > soil_max) soil_max = reading->soil.soil_humidity[1];
+    if (reading->soil.soil_humidity[2] > soil_max) soil_max = reading->soil.soil_humidity[2];
+
+    ESP_LOGD(TAG, "ACTIVE state: soil_avg=%.1f%%, soil_max=%.1f%% (stop=%.1f%%, danger=%.1f%%)",
+             soil_avg, soil_max,
+             s_irrig_ctx.config.soil_threshold_optimal,
+             s_irrig_ctx.config.soil_threshold_max);
+
+    // Calculate elapsed time
+    time_t elapsed = time(NULL) - s_irrig_ctx.session_start_time;
+
+    // Check safety watchdog
+    watchdog_inputs_t watchdog_inputs = {
+        .session_duration_ms = elapsed * 1000,
+        .valve_open_time_ms = elapsed * 1000,
+        .mqtt_override_idle_ms = 0,
+        .current_temperature = reading->ambient.temperature,
+        .current_soil_humidity_avg = soil_avg
+    };
+
+    watchdog_alerts_t alerts = safety_watchdog_check(&watchdog_inputs);
+
+    // Decide if should stop
+    bool should_stop = false;
+    const char* stop_reason = NULL;
+
+    // Check conditions in priority order
+    if (soil_max >= s_irrig_ctx.config.soil_threshold_max) {
+        should_stop = true;
+        stop_reason = "over_moisture";
+        ESP_LOGW(TAG, "Over-moisture detected (%.1f%% >= %.1f%%)",
+                 soil_max, s_irrig_ctx.config.soil_threshold_max);
+    }
+    else if (alerts.temperature_critical) {
+        should_stop = true;
+        stop_reason = "temperature_critical";
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            s_irrig_ctx.thermal_protection_active = true;
+            s_irrig_ctx.current_state = IRRIGATION_THERMAL_PROTECTION;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+        ESP_LOGE(TAG, "THERMAL PROTECTION: T°=%.1f°C > %.1f°C",
+                 reading->ambient.temperature, s_irrig_ctx.config.temp_thermal_stop);
+    }
+    else if (alerts.session_timeout_exceeded) {
+        should_stop = true;
+        stop_reason = "session_timeout";
+        ESP_LOGW(TAG, "Session timeout: %lld sec > %d min",
+                 (long long)elapsed, s_irrig_ctx.config.max_duration_minutes * 60);
+    }
+    else if (soil_avg >= s_irrig_ctx.config.soil_threshold_optimal) {
+        should_stop = true;
+        stop_reason = "target_reached";
+        ESP_LOGI(TAG, "Target soil moisture reached (%.1f%% >= %.1f%%)",
+                 soil_avg, s_irrig_ctx.config.soil_threshold_optimal);
+    }
+
+    // Execute stop if needed
+    if (should_stop) {
+        valve_driver_close(s_irrig_ctx.config.primary_valve);
+
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            s_irrig_ctx.is_valve_open = false;
+            s_irrig_ctx.last_session_end_time = time(NULL);
+            s_irrig_ctx.total_runtime_today_sec += elapsed;
+
+            if (s_irrig_ctx.current_state != IRRIGATION_THERMAL_PROTECTION) {
+                s_irrig_ctx.current_state = IRRIGATION_IDLE;
+            }
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+        ESP_LOGI(TAG, "Irrigation stopped: %s (duration %.1f min)", stop_reason, elapsed / 60.0f);
+
+        // Send webhook
+        send_n8n_webhook("irrigation_off", soil_avg,
+                        reading->ambient.humidity,
+                        reading->ambient.temperature);
+    }
+
+    // Alert if valve timeout (40 min)
+    if (alerts.valve_timeout_exceeded) {
+        ESP_LOGW(TAG, "Valve timeout alert: open for %lld sec", (long long)elapsed);
+    }
+}
+
+/**
+ * @brief State handler: ERROR
+ *
+ * Error state - sensors failed or safety triggered
+ */
+static void irrigation_state_error_handler(const sensor_reading_t* reading)
+{
+    ESP_LOGE(TAG, "ERROR state handler");
+
+    // Close all valves for safety
+    valve_driver_close(1);
+    valve_driver_close(2);
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        s_irrig_ctx.is_valve_open = false;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    if (reading != NULL) {
+        send_n8n_webhook("sensor_error",
+                        (reading->soil.soil_humidity[0] +
+                         reading->soil.soil_humidity[1] +
+                         reading->soil.soil_humidity[2]) / 3.0f,
+                        reading->ambient.humidity,
+                        reading->ambient.temperature);
+    }
+}
+
+/**
+ * @brief State handler: THERMAL_PROTECTION
+ *
+ * Temperature too high - wait for cooling
+ */
+static void irrigation_state_thermal_stop_handler(const sensor_reading_t* reading)
+{
+    if (reading == NULL) {
+        return;
+    }
+
+    ESP_LOGW(TAG, "THERMAL_PROTECTION: T°=%.1f°C (waiting for < %.1f°C)",
+             reading->ambient.temperature,
+             s_irrig_ctx.config.temp_critical);
+
+    // Check if cooled down enough to resume
+    if (reading->ambient.temperature < s_irrig_ctx.config.temp_critical) {
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            s_irrig_ctx.thermal_protection_active = false;
+            s_irrig_ctx.current_state = IRRIGATION_IDLE;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+        ESP_LOGI(TAG, "Temperature normalized, returning to IDLE");
+    }
+
+    send_n8n_webhook("temperature_critical",
+                    (reading->soil.soil_humidity[0] +
+                     reading->soil.soil_humidity[1] +
+                     reading->soil.soil_humidity[2]) / 3.0f,
+                    reading->ambient.humidity,
+                    reading->ambient.temperature);
+}
+
+/* ============================ PUBLIC API ============================ */
+
+esp_err_t irrigation_controller_init(const irrigation_controller_config_t* config)
+{
+    if (is_initialized) {
+        ESP_LOGW(TAG, "Irrigation controller already initialized");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Initializing irrigation controller");
+
+    // Initialize valve driver
+    esp_err_t ret = valve_driver_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize valve driver: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Initialize safety watchdog
+    ret = safety_watchdog_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize safety watchdog: %s", esp_err_to_name(ret));
+        valve_driver_deinit();
+        return ret;
+    }
+
+    // Set configuration
+    if (config != NULL) {
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            s_irrig_ctx.config = *config;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+    } else {
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            s_irrig_ctx.config = _get_default_config();
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+    }
+
+    is_initialized = true;
+
+    // Create evaluation task
+    BaseType_t task_ret = xTaskCreatePinnedToCore(
+        irrigation_evaluation_task,
+        "irrigation_task",
+        4096,
+        NULL,
+        4,  // Priority 4 (below wifi/mqtt at ~5, above idle at ~1)
+        &s_irrigation_task_handle,
+        1   // Core 1
+    );
+
+    if (task_ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create irrigation evaluation task");
+        valve_driver_deinit();
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(TAG, "Irrigation controller initialized");
+    ESP_LOGI(TAG, "  Soil threshold: %.1f%% start, %.1f%% stop",
+             s_irrig_ctx.config.soil_threshold_critical,
+             s_irrig_ctx.config.soil_threshold_optimal);
+    ESP_LOGI(TAG, "  Max duration: %d minutes", s_irrig_ctx.config.max_duration_minutes);
+    ESP_LOGI(TAG, "  Primary valve: %d", s_irrig_ctx.config.primary_valve);
+    ESP_LOGI(TAG, "  Evaluation task created (priority 4, stack 4KB)");
+
+    return ESP_OK;
+}
+
+esp_err_t irrigation_controller_start(uint16_t duration_minutes, uint8_t valve_number)
+{
+    if (!is_initialized) {
+        ESP_LOGE(TAG, "Irrigation controller not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (valve_number < 1 || valve_number > 2) {
+        ESP_LOGE(TAG, "Invalid valve number: %d", valve_number);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Starting irrigation: valve %d, duration %d min", valve_number, duration_minutes);
+
+    // Open valve
+    esp_err_t ret = valve_driver_open(valve_number);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open valve");
+        return ret;
+    }
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        s_irrig_ctx.is_valve_open = true;
+        s_irrig_ctx.active_valve_num = valve_number;
+        s_irrig_ctx.session_start_time = time(NULL);
+        s_irrig_ctx.current_state = IRRIGATION_ACTIVE;
+        s_irrig_ctx.session_count++;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    // Reset watchdog timers
+    safety_watchdog_reset_session();
+    safety_watchdog_reset_valve_timer();
+
+    return ESP_OK;
+}
+
+esp_err_t irrigation_controller_stop(void)
+{
+    if (!is_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Stopping irrigation controller");
+
+    // Close all valves immediately
+    valve_driver_close(1);
+    valve_driver_close(2);
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        s_irrig_ctx.is_valve_open = false;
+        s_irrig_ctx.current_state = IRRIGATION_IDLE;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    // Delete task if running
+    if (s_irrigation_task_handle != NULL) {
+        vTaskDelete(s_irrigation_task_handle);
+        s_irrigation_task_handle = NULL;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t irrigation_controller_deinit(void)
+{
+    if (!is_initialized) {
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Deinitializing irrigation controller");
+
+    // Stop main task
+    irrigation_controller_stop();
+
+    // Deinitialize drivers
+    valve_driver_deinit();
+
+    is_initialized = false;
+
+    return ESP_OK;
+}
+
+irrigation_state_t irrigation_controller_get_state(void)
+{
+    irrigation_state_t state;
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        state = s_irrig_ctx.current_state;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    return state;
+}
+
+esp_err_t irrigation_controller_get_status(irrigation_controller_status_t* status)
+{
+    if (status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!is_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        status->state = s_irrig_ctx.current_state;
+        status->mode = s_irrig_ctx.current_mode;
+        status->is_irrigating = s_irrig_ctx.is_valve_open;
+        status->active_valve = s_irrig_ctx.active_valve_num;
+        status->safety_lock = s_irrig_ctx.safety_lock;
+        status->thermal_protection_active = s_irrig_ctx.thermal_protection_active;
+
+        // Calculate session elapsed time
+        if (s_irrig_ctx.is_valve_open && s_irrig_ctx.session_start_time > 0) {
+            status->session_elapsed_sec = time(NULL) - s_irrig_ctx.session_start_time;
+        } else {
+            status->session_elapsed_sec = 0;
+        }
+
+        // Statistics
+        status->stats.total_sessions = s_irrig_ctx.session_count;
+        status->stats.total_runtime_seconds = 0;  // TODO: accumulate from NVS
+        status->stats.today_runtime_seconds = s_irrig_ctx.total_runtime_today_sec;
+        status->stats.last_session_time = s_irrig_ctx.last_session_end_time;
+
+        // Last evaluation
+        status->last_eval = s_irrig_ctx.last_evaluation;
+        status->last_eval_time = s_irrig_ctx.last_eval_time;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    return ESP_OK;
+}
+
+bool irrigation_controller_is_initialized(void)
+{
+    return is_initialized;
+}
+
+bool irrigation_controller_is_online(void)
+{
+    bool is_online;
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        is_online = s_irrig_ctx.is_online;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    return is_online;
+}
+
+esp_err_t irrigation_controller_get_config(irrigation_controller_config_t* config)
+{
+    if (config == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        *config = s_irrig_ctx.config;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    return ESP_OK;
+}
