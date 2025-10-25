@@ -1,0 +1,193 @@
+================================================================================
+   DIAGRAMA SIMPLE: ¿CÓMO FUNCIONA irrigation_controller_execute_command()?
+================================================================================
+
+
+1. ORIGEN DE LA INSTRUCCIÓN
+═══════════════════════════════════════════════════════════════════════════════
+
+   ┌─────────────────────────────────┐
+   │  Usuario en App Móvil           │
+   │  (Click "Iniciar Riego")        │
+   └────────────────┬────────────────┘
+                    │
+                    │ Envía comando MQTT
+                    │ Topic: irrigation/control/aabbccdd
+                    │ Payload: {"command":"start","duration_minutes":15}
+                    │
+                    ▼
+   ┌─────────────────────────────────┐
+   │  MQTT Broker (Cloud)            │
+   │  (wss://broker.hivemq.com)      │
+   └────────────────┬────────────────┘
+                    │
+                    │ Broker rutea a ESP32
+                    │ (cliente suscrito)
+                    │
+                    ▼
+
+
+2. RECEPCIÓN EN ESP32
+═══════════════════════════════════════════════════════════════════════════════
+
+   ┌──────────────────────────────────────────────┐
+   │  MQTT Client (mqtt_adapter.c)                │
+   │                                              │
+   │  Evento: MQTT_EVENT_DATA                     │
+   │  Topic: irrigation/control/aabbccdd          │
+   │  Payload: {"command":"start"...}             │
+   │                                              │
+   │  mqtt_handle_irrigation_command() {          │
+   │    - Parsea JSON                             │
+   │    - Extrae command="start"                  │
+   │    - Extrae duration_minutes=15              │
+   │    - Llama callback                          │
+   │  }                                           │
+   └────────────┬─────────────────────────────────┘
+                │
+                │ Callback(IRRIGATION_CMD_START, 15)
+                │
+                ▼
+
+
+3. TU FUNCIÓN AQUÍ
+═══════════════════════════════════════════════════════════════════════════════
+
+   ┌─────────────────────────────────────────────────────────────────┐
+   │  irrigation_controller_execute_command()                         │
+   │  (línea 777 en irrigation_controller.c)                          │
+   │                                                                   │
+   │  Parámetros:                                                    │
+   │    - command = IRRIGATION_CMD_START                              │
+   │    - duration_minutes = 15                                      │
+   │                                                                   │
+   │  ┌─ VALIDACIONES ─┐                                             │
+   │  │ 1. Inicializado?  → SI                                       │
+   │  │ 2. Safety lock?   → NO (ok)                                  │
+   │  │ 3. Intervalo?     → SI (4h pasadas)                          │
+   │  │ 4. Límite diario? → NO (360 min ok)                          │
+   │  │ 5. Duración ok?   → SI (< 120)                               │
+   │  └─────────────────┘                                            │
+   │         ↓                                                        │
+   │  Todas las validaciones OK ✓                                   │
+   │                                                                   │
+   └────────┬──────────────────────────────────────────────────────┘
+            │
+            ▼
+
+
+4. EJECUCIÓN (START)
+═══════════════════════════════════════════════════════════════════════════════
+
+   ┌─────────────────────────────────────────────────────────────┐
+   │  Paso 1: ABRIR VÁLVULA                                      │
+   │  valve_driver_open(primary_valve=1)                         │
+   │  └─> GPIO 21 = HIGH → Relay activa → Válvula se abre      │
+   │                                                              │
+   │  Paso 2: CAMBIAR ESTADO INTERNO (con spinlock)              │
+   │  s_irrig_ctx.current_state = IRRIGATION_ACTIVE              │
+   │  s_irrig_ctx.is_valve_open = true                           │
+   │  s_irrig_ctx.session_start_time = NOW                       │
+   │  s_irrig_ctx.session_count++                                │
+   │                                                              │
+   │  Paso 3: RESETEAR TIMERS                                    │
+   │  safety_watchdog_reset_session()                            │
+   │  safety_watchdog_reset_valve_timer()                        │
+   │                                                              │
+   │  Paso 4: NOTIFICAR A N8N                                    │
+   │  send_n8n_webhook("irrigation_on", ...)                     │
+   │  └─> HTTP POST → N8N procesa evento → Notificación         │
+   │                                                              │
+   │  Paso 5: RETORNAR RESULTADO                                 │
+   │  return ESP_OK                                              │
+   │                                                              │
+   └────────┬──────────────────────────────────────────────────┘
+            │
+            ▼
+
+
+5. DESPUÉS DE EJECUCIÓN
+═══════════════════════════════════════════════════════════════════════════════
+
+   ┌──────────────────────────────────────────────────────────────┐
+   │  Task de Evaluación (cada 60 segundos)                       │
+   │                                                               │
+   │  Mientras irrigation_evaluation_task():                       │
+   │    1. Lee sensores (humedad, temperatura)                    │
+   │    2. Evalúa estado (RUNNING handler)                        │
+   │    3. Comprueba condiciones de parada:                       │
+   │       ✓ ¿Humedad >= 75% (target)?    → STOP               │
+   │       ✓ ¿Humedad >= 80% (peligro)?   → EMERGENCY_STOP      │
+   │       ✓ ¿Temperatura > 40°C?         → THERMAL_STOP        │
+   │       ✓ ¿Duración > 120 min?         → STOP                │
+   │    4. Si alguna condición cumple:                            │
+   │       valve_driver_close()                                   │
+   │       Cambiar estado → IDLE                                  │
+   │       send_n8n_webhook("irrigation_off")                     │
+   │    5. Espera 60s y repite                                    │
+   │                                                               │
+   └──────────────────────────────────────────────────────────────┘
+
+
+6. RESULTADO FINAL
+═══════════════════════════════════════════════════════════════════════════════
+
+   ESTADO DEL SISTEMA:
+   ├─ Válvula: ABIERTA (agua fluyendo)
+   ├─ GPIO 21: HIGH
+   ├─ State: IRRIGATION_ACTIVE
+   ├─ Session start: <timestamp>
+   └─ Monitoreo: Activo (task checkeando cada 60s)
+
+   USUARIO VE:
+   ├─ App muestra: "Riego iniciado"
+   ├─ Recibe notificación de N8N
+   ├─ Vé datos en tiempo real
+   └─ Dashboard actualizado
+
+
+================================================================================
+   COMPARACIÓN: DIFERENTES COMANDOS
+================================================================================
+
+   COMANDO: START (Iniciar)
+   ──────────────────────
+   Validación:  Safety lock, timing, límites
+   Acción:      valve_driver_open()
+   Estado →:    IDLE → ACTIVE
+   Webhook:     "irrigation_on"
+   Watchdog:    Start monitoring
+
+
+   COMANDO: STOP (Detener normal)
+   ──────────────────────────────
+   Validación:  Ninguna (siempre permitido)
+   Acción:      valve_driver_close()
+   Estado →:    ACTIVE → IDLE
+   Webhook:     "irrigation_off"
+   Watchdog:    Stop monitoring
+
+
+   COMANDO: EMERGENCY_STOP (Parada emergencia)
+   ─────────────────────────────────────────
+   Validación:  Ninguna (urgente)
+   Acción:      valve_driver_emergency_close_all()
+   Estado →:    Cualquiera → EMERGENCY_STOP
+   Webhook:     "emergency_stop"
+   Resultado:   safety_lock = true (requiere unlock)
+
+
+================================================================================
+   RESUMEN RÁPIDO
+================================================================================
+
+   ¿QUIÉN LLAMA?              MQTT Client (mqtt_adapter.c)
+   ¿CÓMO RECIBE?              Callback registrado en inicio
+   ¿DE DÓNDE VIENE?           Topic MQTT: irrigation/control/{MAC}
+   ¿QUÉ CONTIENE?             {"command":"start|stop|emergency","duration":15}
+   ¿QUÉ HACE?                 Valida → Abre/cierra válvula → Notifica
+   ¿RETORNA QUÉ?              ESP_OK (éxito) o error code
+   ¿LUEGO?                    Task monitorea cada 60s y auto-detiene
+
+
+================================================================================

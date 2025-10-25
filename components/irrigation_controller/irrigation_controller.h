@@ -230,6 +230,69 @@ esp_err_t irrigation_controller_start(uint16_t duration_minutes, uint8_t valve_n
 esp_err_t irrigation_controller_stop(void);
 
 /**
+ * @brief Execute irrigation command via MQTT
+ *
+ * Executes START, STOP, or EMERGENCY_STOP command with full safety validation.
+ * Applies all security checks (safety lock, timing, daily limits).
+ *
+ * START command:
+ * - Validates safety_lock (if active, rejects)
+ * - Validates minimum interval between sessions (4h default)
+ * - Validates max daily irrigation time (360 min default)
+ * - Opens valve and changes state to ACTIVE
+ *
+ * STOP command:
+ * - Closes valve
+ * - Changes state to IDLE
+ * - Accumulates runtime to daily counter
+ *
+ * EMERGENCY_STOP command:
+ * - Closes ALL valves immediately
+ * - Activates safety_lock (prevents any irrigation until manually unlocked)
+ * - Changes state to EMERGENCY_STOP
+ *
+ * @param command Command type (START/STOP/EMERGENCY_STOP)
+ * @param duration_minutes Duration for START command (0 = default 15 min)
+ * @return ESP_OK if executed, ESP_ERR_INVALID_STATE if safety checks fail,
+ *         ESP_ERR_INVALID_ARG for invalid command
+ */
+esp_err_t irrigation_controller_execute_command(irrigation_command_t command,
+                                                uint16_t duration_minutes);
+
+/**
+ * @brief Evaluate soil/environment conditions and decide irrigation action
+ *
+ * Evaluates sensor data and decides irrigation action based on mode (ONLINE/OFFLINE).
+ *
+ * ONLINE MODE (WiFi/MQTT connected):
+ * - Evaluates thresholds
+ * - Only RECOMMENDS actions (saves in last_evaluation)
+ * - Does NOT execute (waits for MQTT command)
+ * - Useful for cloud-based decisions
+ *
+ * OFFLINE MODE (no WiFi/MQTT):
+ * - Evaluates thresholds
+ * - Uses offline_mode_driver to determine level (NORMAL/WARNING/CRITICAL/EMERGENCY)
+ * - AUTO-EXECUTES irrigation if needed (CRITICAL or EMERGENCY levels)
+ * - Provides autonomous operation when disconnected
+ *
+ * Evaluation Thresholds:
+ * - soil < critical (30%): START irrigation
+ * - soil >= optimal (75%): STOP irrigation
+ * - soil >= max (80%): EMERGENCY STOP (over-moisture)
+ * - temperature > 40°C: THERMAL PROTECTION
+ *
+ * @param soil_data Soil moisture data from 3 sensors
+ * @param ambient_data Temperature and humidity data
+ * @param[out] evaluation Optional pointer to store evaluation result
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if not initialized,
+ *         ESP_ERR_INVALID_ARG if parameters invalid
+ */
+esp_err_t irrigation_controller_evaluate_and_act(const soil_data_t* soil_data,
+                                                 const ambient_data_t* ambient_data,
+                                                 irrigation_evaluation_t* evaluation);
+
+/**
  * @brief Emergency stop
  *
  * Immediately stops irrigation and activates safety lock.

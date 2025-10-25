@@ -17,8 +17,10 @@
 #include "irrigation_controller.h"
 #include "drivers/valve_driver/valve_driver.h"
 #include "drivers/safety_watchdog/safety_watchdog.h"
+#include "drivers/offline_mode/offline_mode_driver.h"
 #include "sensor_reader.h"
 #include "wifi_manager.h"
+#include "device_config.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "cJSON.h"
@@ -545,6 +547,14 @@ esp_err_t irrigation_controller_init(const irrigation_controller_config_t* confi
         return ret;
     }
 
+    // Initialize offline mode driver
+    ret = offline_mode_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize offline mode driver: %s", esp_err_to_name(ret));
+        valve_driver_deinit();
+        return ret;
+    }
+
     // Set configuration
     if (config != NULL) {
         portENTER_CRITICAL(&s_irrigation_spinlock);
@@ -758,6 +768,348 @@ esp_err_t irrigation_controller_get_config(irrigation_controller_config_t* confi
         *config = s_irrig_ctx.config;
     }
     portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    return ESP_OK;
+}
+
+/* ============================ MQTT COMMAND EXECUTION ============================ */
+
+esp_err_t irrigation_controller_execute_command(irrigation_command_t command,
+                                                uint16_t duration_minutes)
+{
+    if (!is_initialized) {
+        ESP_LOGE(TAG, "Irrigation controller not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Execute command: %d, duration: %d min", command, duration_minutes);
+
+    // Get current state
+    bool safety_lock;
+    time_t next_allowed;
+    uint32_t daily_runtime;
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        safety_lock = s_irrig_ctx.safety_lock;
+        next_allowed = s_irrig_ctx.next_allowed_session;
+        daily_runtime = s_irrig_ctx.total_runtime_today_sec;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    // Handle EMERGENCY_STOP
+    if (command == IRRIGATION_CMD_EMERGENCY_STOP) {
+        ESP_LOGE(TAG, "EMERGENCY STOP executed via MQTT command");
+
+        // Close all valves immediately
+        valve_driver_emergency_close_all();
+
+        // Activate safety lock
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            s_irrig_ctx.safety_lock = true;
+            s_irrig_ctx.is_valve_open = false;
+            s_irrig_ctx.current_state = IRRIGATION_EMERGENCY_STOP;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+        // Send N8N notification
+        send_n8n_webhook("emergency_stop", 0.0f, 0.0f, 0.0f);
+
+        return ESP_OK;
+    }
+
+    // Handle STOP
+    if (command == IRRIGATION_CMD_STOP) {
+        ESP_LOGI(TAG, "Stop irrigation via MQTT command");
+
+        // Close valves
+        valve_driver_close(s_irrig_ctx.config.primary_valve);
+
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            if (s_irrig_ctx.is_valve_open) {
+                s_irrig_ctx.is_valve_open = false;
+                s_irrig_ctx.last_session_end_time = time(NULL);
+                if (s_irrig_ctx.session_start_time > 0) {
+                    time_t duration = time(NULL) - s_irrig_ctx.session_start_time;
+                    s_irrig_ctx.total_runtime_today_sec += duration;
+                }
+            }
+            s_irrig_ctx.current_state = IRRIGATION_IDLE;
+            s_irrig_ctx.mqtt_override_active = false;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+        return ESP_OK;
+    }
+
+    // Handle START
+    if (command == IRRIGATION_CMD_START) {
+        // Check safety lock
+        if (safety_lock) {
+            ESP_LOGW(TAG, "Cannot START: safety lock is active (requires manual unlock)");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        // Check minimum interval between sessions
+        time_t now = time(NULL);
+        if (now < next_allowed) {
+            uint32_t wait_minutes = (next_allowed - now) / 60;
+            ESP_LOGW(TAG, "Cannot START: must wait %lu more minutes (min interval: %d minutes)",
+                     wait_minutes, s_irrig_ctx.config.min_interval_minutes);
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        // Check max daily duration
+        if (daily_runtime >= (s_irrig_ctx.config.max_daily_minutes * 60)) {
+            ESP_LOGW(TAG, "Cannot START: max daily duration reached (%d minutes)",
+                     s_irrig_ctx.config.max_daily_minutes);
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        // If duration not specified, use default
+        if (duration_minutes == 0) {
+            duration_minutes = 15;  // Default 15 minutes
+        }
+
+        // Validate duration against max
+        if (duration_minutes > s_irrig_ctx.config.max_duration_minutes) {
+            ESP_LOGW(TAG, "Duration %d exceeds max %d, clamping",
+                     duration_minutes, s_irrig_ctx.config.max_duration_minutes);
+            duration_minutes = s_irrig_ctx.config.max_duration_minutes;
+        }
+
+        // Open valve
+        esp_err_t ret = valve_driver_open(s_irrig_ctx.config.primary_valve);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to open valve: %s", esp_err_to_name(ret));
+            return ret;
+        }
+
+        // Update state
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            s_irrig_ctx.is_valve_open = true;
+            s_irrig_ctx.active_valve_num = s_irrig_ctx.config.primary_valve;
+            s_irrig_ctx.session_start_time = time(NULL);
+            s_irrig_ctx.current_session_duration_min = duration_minutes;
+            s_irrig_ctx.current_state = IRRIGATION_ACTIVE;
+            s_irrig_ctx.session_count++;
+            s_irrig_ctx.mqtt_override_active = true;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+        // Reset watchdog timers
+        safety_watchdog_reset_session();
+        safety_watchdog_reset_valve_timer();
+
+        ESP_LOGI(TAG, "Irrigation started via MQTT: valve %d, duration %d min",
+                 s_irrig_ctx.config.primary_valve, duration_minutes);
+
+        // Send N8N notification
+        send_n8n_webhook("irrigation_on", 0.0f, 0.0f, 0.0f);
+
+        return ESP_OK;
+    }
+
+    ESP_LOGW(TAG, "Unknown command: %d", command);
+    return ESP_ERR_INVALID_ARG;
+}
+
+/* ============================ EVALUATION AND DECISION ============================ */
+
+esp_err_t irrigation_controller_evaluate_and_act(const soil_data_t* soil_data,
+                                                 const ambient_data_t* ambient_data,
+                                                 irrigation_evaluation_t* evaluation)
+{
+    if (!is_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // If both parameters NULL, cannot evaluate
+    if (soil_data == NULL || ambient_data == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Calculate average soil humidity from 3 sensors
+    float soil_avg = (soil_data->soil_humidity[0] +
+                      soil_data->soil_humidity[1] +
+                      soil_data->soil_humidity[2]) / 3.0f;
+
+    float soil_max = soil_data->soil_humidity[0];
+    if (soil_data->soil_humidity[1] > soil_max) soil_max = soil_data->soil_humidity[1];
+    if (soil_data->soil_humidity[2] > soil_max) soil_max = soil_data->soil_humidity[2];
+
+    // Get current state and mode
+    irrigation_state_t current_state;
+    bool is_online;
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        current_state = s_irrig_ctx.current_state;
+        is_online = s_irrig_ctx.is_online;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    // Initialize evaluation result
+    irrigation_evaluation_t eval = {
+        .decision = IRRIGATION_DECISION_NO_ACTION,
+        .soil_avg_humidity = soil_avg,
+        .ambient_temperature = ambient_data->temperature,
+        .duration_minutes = 0
+    };
+
+    // Evaluate based on mode
+    if (is_online) {
+        // ONLINE MODE: Only recommend, don't execute
+        ESP_LOGD(TAG, "ONLINE mode evaluation: soil=%.1f%%, temp=%.1f°C, state=%d",
+                 soil_avg, ambient_data->temperature, current_state);
+
+        if (current_state == IRRIGATION_IDLE) {
+            // Check if should start
+            if (soil_avg < s_irrig_ctx.config.soil_threshold_critical) {
+                eval.decision = IRRIGATION_DECISION_START;
+                eval.duration_minutes = 15;
+                snprintf(eval.reason, sizeof(eval.reason),
+                        "Dry soil (%.1f%% < %.1f%%), recommendation only",
+                        soil_avg, s_irrig_ctx.config.soil_threshold_critical);
+            } else if (soil_avg < s_irrig_ctx.config.soil_threshold_optimal) {
+                eval.decision = IRRIGATION_DECISION_NO_ACTION;
+                snprintf(eval.reason, sizeof(eval.reason),
+                        "Soil moisture adequate (%.1f%%)", soil_avg);
+            } else {
+                eval.decision = IRRIGATION_DECISION_NO_ACTION;
+                snprintf(eval.reason, sizeof(eval.reason),
+                        "Soil moisture sufficient (%.1f%%)", soil_avg);
+            }
+        } else if (current_state == IRRIGATION_ACTIVE) {
+            // Monitoring running irrigation
+            if (soil_max >= s_irrig_ctx.config.soil_threshold_max) {
+                eval.decision = IRRIGATION_DECISION_STOP;
+                snprintf(eval.reason, sizeof(eval.reason),
+                        "Over-moisture detected (%.1f%% >= %.1f%%)",
+                        soil_max, s_irrig_ctx.config.soil_threshold_max);
+            } else if (soil_avg >= s_irrig_ctx.config.soil_threshold_optimal) {
+                eval.decision = IRRIGATION_DECISION_STOP;
+                snprintf(eval.reason, sizeof(eval.reason),
+                        "Target soil moisture reached (%.1f%% >= %.1f%%)",
+                        soil_avg, s_irrig_ctx.config.soil_threshold_optimal);
+            } else {
+                eval.decision = IRRIGATION_DECISION_CONTINUE;
+                snprintf(eval.reason, sizeof(eval.reason),
+                        "Continue irrigation (soil %.1f%% < target %.1f%%)",
+                        soil_avg, s_irrig_ctx.config.soil_threshold_optimal);
+            }
+        }
+    } else {
+        // OFFLINE MODE: Evaluate and execute automatically
+        offline_evaluation_t offline_eval = offline_mode_evaluate(soil_avg);
+
+        ESP_LOGD(TAG, "OFFLINE mode: level=%d, interval=%lu ms, soil=%.1f%%",
+                 offline_eval.level, offline_eval.interval_ms, soil_avg);
+
+        if (current_state == IRRIGATION_IDLE) {
+            // Check offline level
+            if (offline_eval.level >= OFFLINE_LEVEL_CRITICAL) {
+                // Critical or emergency - start automatically
+                ESP_LOGI(TAG, "OFFLINE: Starting automatic irrigation (level=%d, soil=%.1f%%)",
+                        offline_eval.level, soil_avg);
+
+                // Execute start
+                esp_err_t ret = valve_driver_open(s_irrig_ctx.config.primary_valve);
+                if (ret == ESP_OK) {
+                    portENTER_CRITICAL(&s_irrigation_spinlock);
+                    {
+                        s_irrig_ctx.is_valve_open = true;
+                        s_irrig_ctx.active_valve_num = s_irrig_ctx.config.primary_valve;
+                        s_irrig_ctx.session_start_time = time(NULL);
+                        s_irrig_ctx.current_state = IRRIGATION_ACTIVE;
+                        s_irrig_ctx.session_count++;
+                    }
+                    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+                    safety_watchdog_reset_session();
+                    safety_watchdog_reset_valve_timer();
+
+                    eval.decision = IRRIGATION_DECISION_START;
+                    eval.duration_minutes = 20;
+                    snprintf(eval.reason, sizeof(eval.reason),
+                            "Auto-start OFFLINE (level=%s, soil=%.1f%%)",
+                            offline_eval.reason, soil_avg);
+                } else {
+                    eval.decision = IRRIGATION_DECISION_NO_ACTION;
+                    snprintf(eval.reason, sizeof(eval.reason), "Failed to open valve");
+                }
+            } else {
+                eval.decision = IRRIGATION_DECISION_NO_ACTION;
+                snprintf(eval.reason, sizeof(eval.reason),
+                        "OFFLINE: Normal level, no action (soil=%.1f%%)", soil_avg);
+            }
+        }
+    }
+
+    // Save evaluation
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        s_irrig_ctx.last_evaluation = eval;
+        s_irrig_ctx.last_eval_time = time(NULL);
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    // Return result if requested
+    if (evaluation != NULL) {
+        *evaluation = eval;
+    }
+
+    return ESP_OK;
+}
+
+/* ============================ STATISTICS AND PERSISTENCE ============================ */
+
+esp_err_t irrigation_controller_get_stats(irrigation_stats_t* stats)
+{
+    if (stats == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!is_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        stats->total_sessions = s_irrig_ctx.session_count;
+        stats->total_runtime_seconds = 0;  // TODO: read from NVS
+        stats->today_runtime_seconds = s_irrig_ctx.total_runtime_today_sec;
+        stats->emergency_stops = 0;        // TODO: increment in emergency_stop
+        stats->thermal_stops = 0;          // TODO: increment in thermal protection
+        stats->last_session_time = s_irrig_ctx.last_session_end_time;
+
+        // Memset to avoid uninitialized data
+        memset(&stats->last_session, 0, sizeof(irrigation_session_t));
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    return ESP_OK;
+}
+
+esp_err_t irrigation_controller_reset_daily_stats(void)
+{
+    if (!is_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Resetting daily statistics");
+
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        s_irrig_ctx.total_runtime_today_sec = 0;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+
+    // TODO: Persist to NVS for recovery after reboot
+    // device_config_set_u32("irrig_cfg", "today_run", 0);
 
     return ESP_OK;
 }

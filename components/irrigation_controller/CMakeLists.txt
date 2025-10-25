@@ -3,8 +3,9 @@ idf_component_register(
         "irrigation_controller.c"
         "drivers/valve_driver/valve_driver.c"
         "drivers/safety_watchdog/safety_watchdog.c"
-    INCLUDE_DIRS "." "drivers/valve_driver" "drivers/safety_watchdog"
-    PRIV_INCLUDE_DIRS "." "drivers/valve_driver" "drivers/safety_watchdog"
+        "drivers/offline_mode/offline_mode_driver.c"
+    INCLUDE_DIRS "." "drivers/valve_driver" "drivers/safety_watchdog" "drivers/offline_mode"
+    PRIV_INCLUDE_DIRS "." "drivers/valve_driver" "drivers/safety_watchdog" "drivers/offline_mode"
     REQUIRES
         sensor_reader
         wifi_manager
