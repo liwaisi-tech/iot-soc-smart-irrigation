@@ -106,12 +106,12 @@ uint8_t valve_driver_get_state_bitmask(void);
 /**
  * @brief GPIO pin for valve 1
  *
- * Phase 5: GPIO_NUM_21 (LED simulator for testing)
+ * Phase 5: GPIO_NUM_25 (LED simulator for testing) - Changed from 21 (I2C SDA conflict)
  * Phase 6: GPIO_NUM_2 (Relay IN1)
  *
- * GPIO_NUM_21 is safe for output (not boot-related)
+ * GPIO_NUM_25 is safe for output (not boot-related, not I2C)
  */
-#define VALVE_1_GPIO     GPIO_NUM_21
+#define VALVE_1_GPIO     GPIO_NUM_25
 
 /**
  * @brief GPIO pin for valve 2

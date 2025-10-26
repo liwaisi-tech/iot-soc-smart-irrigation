@@ -30,8 +30,8 @@ static const char *TAG = "valve_driver";
  * @brief Valve state tracking
  *
  * Array indices correspond to valve numbers:
- * - valve_states[0] = Valve 1 (GPIO_NUM_21)
- * - valve_states[1] = Valve 2 (GPIO_NUM_4)
+ * - valve_states[0] = Valve 1 (GPIO_NUM_25 - LED simulator Phase 5)
+ * - valve_states[1] = Valve 2 (GPIO_NUM_4 - future relay Phase 6)
  */
 static bool valve_states[MAX_VALVES] = {false, false};
 
@@ -119,7 +119,7 @@ esp_err_t valve_driver_init(void)
     portEXIT_CRITICAL(&valve_spinlock);
 
     is_initialized = true;
-    ESP_LOGI(TAG, "Valve driver initialized: GPIO %d (valve 1), GPIO %d (valve 2)",
+    ESP_LOGI(TAG, "Valve driver initialized: GPIO %d (valve 1 - LED simulator), GPIO %d (valve 2 - future relay)",
              VALVE_1_GPIO, VALVE_2_GPIO);
 
     return ESP_OK;

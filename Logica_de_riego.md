@@ -51,7 +51,7 @@
 
 ```c
 // Actuador
-#define IRRIGATION_VALVE_LED_GPIO        GPIO_NUM_21  // LED simulador (Phase 5)
+#define IRRIGATION_VALVE_LED_GPIO        GPIO_NUM_25  // LED simulador (Phase 5) - Changed from 21 (I2C SDA conflict)
 
 // Sensores (ya configurados en sensor_reader)
 #define SOIL_MOISTURE_1_ADC              ADC1_CHANNEL_0  // GPIO 36

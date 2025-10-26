@@ -144,9 +144,11 @@ Each component manages its own thread-safety internally.
 ### GPIO Pin Assignments (Standardized)
 ```c
 // Irrigation valve control (relay outputs)
-#define IRRIGATION_VALVE_1_GPIO     GPIO_NUM_2
-#define IRRIGATION_VALVE_2_GPIO     GPIO_NUM_4
-#define IRRIGATION_VALVE_3_GPIO     GPIO_NUM_5
+// Phase 5: GPIO_NUM_25 (LED simulator)
+// Phase 6: GPIO_NUM_2, GPIO_NUM_4, GPIO_NUM_5 (relay modules)
+#define IRRIGATION_VALVE_1_GPIO     GPIO_NUM_25    // Phase 5: LED simulator
+#define IRRIGATION_VALVE_2_GPIO     GPIO_NUM_4     // Phase 6: Relay IN2
+#define IRRIGATION_VALVE_3_GPIO     GPIO_NUM_5     // Phase 6: Relay IN3
 
 // Environmental sensor (DHT22)
 #define DHT22_DATA_GPIO            GPIO_NUM_18
@@ -156,8 +158,9 @@ Each component manages its own thread-safety internally.
 #define SOIL_MOISTURE_2_ADC        ADC1_CHANNEL_3  // GPIO 39
 #define SOIL_MOISTURE_3_ADC        ADC1_CHANNEL_6  // GPIO 34
 
-// Status LED
-#define STATUS_LED_GPIO            GPIO_NUM_2
+// I2C (Reserved - NOT in use currently)
+// GPIO_NUM_21 = SDA (available for future I2C)
+// GPIO_NUM_22 = SCL (available for future I2C)
 ```
 
 ### Power Requirements
