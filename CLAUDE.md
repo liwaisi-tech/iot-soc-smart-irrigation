@@ -1,6 +1,6 @@
 # CLAUDE.md - Smart Irrigation System Project Guide
 
-**Last Updated**: 2025-10-18 | **Version**: 2.0.0 | **Phase**: Phase 5 (Ready)
+**Last Updated**: 2025-10-26 | **Version**: 2.1.0 | **Phase**: Phase 5 (In Progress)
 
 ## 🔴 CRITICAL: PHASE 5 RULES
 
@@ -23,9 +23,10 @@
 | wifi_manager | ✅ | ✅ 100% | `components/wifi_manager/` | 4 spinlocks protecting state |
 | mqtt_client | ✅ | ✅ 100% | `components/mqtt_client/` | Kconfig: MQTT_BROKER_URI |
 | http_server | ✅ | ✅ 100% | `components/http_server/` | REST endpoints |
-| **irrigation_controller** | 📋 | ⏳ | `components/` | **Phase 5 - START HERE** |
+| **notification_service** | ✅ | ✅ 100% | `components/notification_service/` | **NEW**: N8N webhooks (refactored from irrigation_controller) |
+| **irrigation_controller** | ✅ | ✅ 100% | `components/irrigation_controller/` | **Phase 5 Complete**: valve control + state machine |
 
-**Binary**: 942.80 KB (56% free = 1.14 MB) | **Compilation**: ✅ No errors | **ESP-IDF**: v5.4.2
+**Binary**: 951.82 KB (54% free = 1.13 MB) | **Compilation**: ✅ No errors | **ESP-IDF**: v5.4.2
 
 ---
 
@@ -59,7 +60,8 @@ This is a **Smart Irrigation System** IoT project built with **ESP-IDF** for ESP
 | **wifi_manager** | WiFi + provisioning + boot counter | ✅ 100% | ✅ 3 spinlocks |
 | **mqtt_client** | MQTT + WebSockets (Kconfig: MQTT_BROKER_URI) | ✅ 100% | ✅ Task-based |
 | **http_server** | REST endpoints (/whoami, /sensors, /ping) | ✅ 100% | ✅ ESP-IDF native |
-| **irrigation_controller** | 📋 Phase 5 (valve control, MQTT commands) | 🔄 TODO | ⏳ Pending |
+| **notification_service** | N8N webhooks (refactored from irrigation_controller) | ✅ 100% | ✅ portMUX_TYPE |
+| **irrigation_controller** | Valve control, state machine, MQTT commands | ✅ 100% | ✅ portMUX_TYPE |
 
 ## Component-Based Architecture Principles
 
@@ -80,6 +82,11 @@ main.c
   ├──> mqtt_client ──> device_config
   ├──> http_server ──> sensor_reader ──> device_config
   ├──> sensor_reader
+  ├──> notification_service ──> wifi_manager
+  ├──> irrigation_controller ──> notification_service
+  │                         ├──> sensor_reader
+  │                         ├──> wifi_manager
+  │                         └──> mqtt_client
   └──> device_config
 
 Direct dependencies, no layered abstraction.
@@ -89,8 +96,10 @@ Each component manages its own thread-safety internally.
 ### **Key Architectural Decisions**
 - ❌ **Removed**: Hexagonal Architecture (too complex for ESP32)
 - ❌ **Removed**: `shared_resource_manager` (violated SRC/MIS/DD)
+- ❌ **Removed**: N8N webhooks from `irrigation_controller` (violated SRC) → extracted to `notification_service`
 - ✅ **Added**: Thread-safety per component (mutexes/spinlocks internos)
 - ✅ **Added**: Direct component-to-component communication
+- ✅ **Added**: `notification_service` component for reusable webhook functionality
 - ✅ **Simplified**: Configuration consolidated in `device_config`
 
 ## Key Features & Requirements

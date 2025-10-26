@@ -15,6 +15,7 @@
  */
 
 #include "irrigation_controller.h"
+#include "notification_service.h"
 #include "drivers/valve_driver/valve_driver.h"
 #include "drivers/safety_watchdog/safety_watchdog.h"
 #include "drivers/offline_mode/offline_mode_driver.h"
@@ -22,8 +23,6 @@
 #include "wifi_manager.h"
 #include "device_config.h"
 #include "esp_log.h"
-#include "esp_http_client.h"
-#include "cJSON.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -296,77 +295,6 @@ static irrigation_controller_config_t _get_default_config(void)
     };
 }
 
-/**
- * @brief Send N8N webhook for irrigation event
- *
- * Sends HTTP POST to N8N with event data
- */
-static void send_n8n_webhook(const char* event_type,
-                             float soil_moisture_prom,
-                             float humidity,
-                             float temperature)
-{
-    if (event_type == NULL) {
-        return;
-    }
-
-    // Build JSON payload
-    cJSON* root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "event_type", event_type);
-    cJSON_AddStringToObject(root, "device_id", "ESP32_HUERTA_001");
-
-    cJSON* sensor_data = cJSON_CreateObject();
-    cJSON_AddNumberToObject(sensor_data, "soil_moisture_prom", soil_moisture_prom);
-    cJSON_AddNumberToObject(sensor_data, "humidity", humidity);
-    cJSON_AddNumberToObject(sensor_data, "temperature", temperature);
-    cJSON_AddItemToObject(root, "sensor_data", sensor_data);
-
-    char* json_str = cJSON_Print(root);
-    cJSON_Delete(root);
-
-    if (json_str == NULL) {
-        ESP_LOGE(TAG, "Failed to serialize JSON for N8N webhook");
-        return;
-    }
-
-    // Create HTTP client
-    #ifdef CONFIG_IRRIGATION_N8N_WEBHOOK_URL
-        #define N8N_WEBHOOK_URL CONFIG_IRRIGATION_N8N_WEBHOOK_URL
-    #else
-        #define N8N_WEBHOOK_URL "http://192.168.1.177:5678/webhook/irrigation-events"
-    #endif
-
-    esp_http_client_config_t config = {
-        .url = N8N_WEBHOOK_URL,
-        .method = HTTP_METHOD_POST,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        ESP_LOGE(TAG, "Failed to create HTTP client for N8N webhook");
-        free(json_str);
-        return;
-    }
-
-    // Set headers
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_http_client_set_header(client, "X-API-Key", "d1b4873f5144c6db6c87f03109010c314a7fb9edf3052f4f478bb2d967181427");
-
-    // Set request body
-    esp_http_client_set_post_field(client, json_str, strlen(json_str));
-
-    // Perform request
-    esp_err_t ret = esp_http_client_perform(client);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(ret));
-    } else {
-        int status_code = esp_http_client_get_status_code(client);
-        ESP_LOGI(TAG, "N8N webhook sent: %s (HTTP %d)", event_type, status_code);
-    }
-
-    esp_http_client_cleanup(client);
-    free(json_str);
-}
 
 /**
  * @brief State handler: IDLE
@@ -410,10 +338,10 @@ static void irrigation_state_idle_handler(const sensor_reading_t* reading)
         safety_watchdog_reset_session();
         safety_watchdog_reset_valve_timer();
 
-        // Send webhook
-        send_n8n_webhook("irrigation_on", soil_avg,
-                        reading->ambient.humidity,
-                        reading->ambient.temperature);
+        // Send notification
+        notification_send_irrigation_event("irrigation_on", soil_avg,
+                                          reading->ambient.humidity,
+                                          reading->ambient.temperature);
     }
 }
 
@@ -511,10 +439,10 @@ static void irrigation_state_running_handler(const sensor_reading_t* reading)
 
         ESP_LOGI(TAG, "Irrigation stopped: %s (duration %.1f min)", stop_reason, elapsed / 60.0f);
 
-        // Send webhook
-        send_n8n_webhook("irrigation_off", soil_avg,
-                        reading->ambient.humidity,
-                        reading->ambient.temperature);
+        // Send notification
+        notification_send_irrigation_event("irrigation_off", soil_avg,
+                                          reading->ambient.humidity,
+                                          reading->ambient.temperature);
     }
 
     // Alert if valve timeout (40 min)
@@ -543,7 +471,7 @@ static void irrigation_state_error_handler(const sensor_reading_t* reading)
     portEXIT_CRITICAL(&s_irrigation_spinlock);
 
     if (reading != NULL) {
-        send_n8n_webhook("sensor_error",
+        notification_send_irrigation_event("sensor_error",
                         (reading->soil.soil_humidity[0] +
                          reading->soil.soil_humidity[1] +
                          reading->soil.soil_humidity[2]) / 3.0f,
@@ -579,7 +507,7 @@ static void irrigation_state_thermal_stop_handler(const sensor_reading_t* readin
         ESP_LOGI(TAG, "Temperature normalized, returning to IDLE");
     }
 
-    send_n8n_webhook("temperature_critical",
+    notification_send_irrigation_event("temperature_critical",
                     (reading->soil.soil_humidity[0] +
                      reading->soil.soil_humidity[1] +
                      reading->soil.soil_humidity[2]) / 3.0f,
@@ -879,8 +807,8 @@ esp_err_t irrigation_controller_execute_command(irrigation_command_t command,
         }
         portEXIT_CRITICAL(&s_irrigation_spinlock);
 
-        // Send N8N notification
-        send_n8n_webhook("emergency_stop", 0.0f, 0.0f, 0.0f);
+        // Send notification
+        notification_send_irrigation_event("emergency_stop", 0.0f, 0.0f, 0.0f);
 
         return ESP_OK;
     }
@@ -973,8 +901,8 @@ esp_err_t irrigation_controller_execute_command(irrigation_command_t command,
         ESP_LOGI(TAG, "Irrigation started via MQTT: valve %d, duration %d min",
                  s_irrig_ctx.config.primary_valve, duration_minutes);
 
-        // Send N8N notification
-        send_n8n_webhook("irrigation_on", 0.0f, 0.0f, 0.0f);
+        // Send notification
+        notification_send_irrigation_event("irrigation_on", 0.0f, 0.0f, 0.0f);
 
         return ESP_OK;
     }

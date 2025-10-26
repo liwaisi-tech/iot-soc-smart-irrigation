@@ -18,6 +18,7 @@
 #include "mqtt_client_manager.h"     // Migrated from mqtt_adapter
 #include "device_config.h"           // Migrated component
 #include "sensor_reader.h"           // Migrated component - unified sensor interface
+#include "notification_service.h"    // Notification service for webhooks
 #include "irrigation_controller.h"   // Phase 5 - Irrigation control logic
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
@@ -300,6 +301,16 @@ void app_main(void)
     // Inicializar cliente MQTT
     ESP_LOGI(TAG, "Inicializando cliente MQTT...");
     ESP_ERROR_CHECK(mqtt_client_init());
+
+    // Inicializar servicio de notificaciones (webhooks N8N)
+    ESP_LOGI(TAG, "Inicializando servicio de notificaciones...");
+    ret = notification_service_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Error al inicializar notification_service: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "WARNING: Notificaciones de riego NO disponibles");
+    } else {
+        ESP_LOGI(TAG, "Notification service inicializado correctamente");
+    }
 
     // Inicializar controlador de riego (Phase 5)
     ESP_LOGI(TAG, "Inicializando controlador de riego...");

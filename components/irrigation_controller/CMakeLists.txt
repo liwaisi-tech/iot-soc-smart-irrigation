@@ -11,12 +11,12 @@ idf_component_register(
         wifi_manager
         mqtt_client
         device_config
+        notification_service
         driver
         esp_driver_gpio
     PRIV_REQUIRES
         esp_timer
         nvs_flash
-        esp_http_client
 )
 
 # Add include path for common_types.h
