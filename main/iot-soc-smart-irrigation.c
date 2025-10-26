@@ -18,6 +18,7 @@
 #include "mqtt_client_manager.h"     // Migrated from mqtt_adapter
 #include "device_config.h"           // Migrated component
 #include "sensor_reader.h"           // Migrated component - unified sensor interface
+#include "irrigation_controller.h"   // Phase 5 - Irrigation control logic
 
 static const char *TAG = "SMART_IRRIGATION_MAIN";
 static bool s_http_server_initialized = false;
@@ -26,6 +27,16 @@ static bool s_http_server_initialized = false;
 #define SENSOR_PUBLISH_TASK_STACK_SIZE    4096
 #define SENSOR_PUBLISH_TASK_PRIORITY      3  // Reduced from 5 to 3 - avoid priority inversion with HTTP/WiFi tasks
 #define SENSOR_PUBLISH_INTERVAL_MS        30000  // 30 seconds
+
+/**
+ * @brief Callback para comandos de riego recibidos via MQTT
+ *
+ * Ejecuta comandos START/STOP/EMERGENCY_STOP con validaciones de seguridad.
+ * Llamado automáticamente cuando se recibe un mensaje en topic "irrigation/control/{mac}"
+ */
+static void mqtt_irrigation_command_handler(irrigation_command_t command,
+                                           uint16_t duration_minutes,
+                                           void* user_data);
 
 /**
  * @brief Sensor publishing task (Component-Based Architecture)
@@ -94,6 +105,42 @@ static void sensor_publishing_task(void *pvParameters)
         if (cycle_count % 10 == 0) {
             ESP_LOGI(TAG, "Cycle %" PRIu32 ": Data published successfully to MQTT", cycle_count);
         }
+    }
+}
+
+/**
+ * @brief Handler de comandos MQTT para control de riego
+ *
+ * Recibe comandos via MQTT y los ejecuta a través del irrigation_controller.
+ * Comandos soportados:
+ * - START: Inicia riego con duración especificada (default 15 min)
+ * - STOP: Detiene riego normalmente
+ * - EMERGENCY_STOP: Detiene riego y activa safety lock
+ *
+ * @param command Tipo de comando (START/STOP/EMERGENCY_STOP)
+ * @param duration_minutes Duración en minutos (solo para START, 0=default)
+ * @param user_data Datos de usuario (no utilizado)
+ */
+static void mqtt_irrigation_command_handler(irrigation_command_t command,
+                                           uint16_t duration_minutes,
+                                           void* user_data)
+{
+    // Nombres de comandos para logging
+    const char* cmd_names[] = {"START", "STOP", "EMERGENCY_STOP", "PAUSE", "RESUME"};
+
+    ESP_LOGI(TAG, "MQTT irrigation command received: %s (duration: %d min)",
+             cmd_names[command], duration_minutes);
+
+    // Ejecutar comando via irrigation_controller
+    esp_err_t ret = irrigation_controller_execute_command(command, duration_minutes);
+
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Irrigation command executed successfully: %s", cmd_names[command]);
+    } else if (ret == ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "Irrigation command rejected (safety check failed): %s", cmd_names[command]);
+        ESP_LOGW(TAG, "Possible reasons: safety lock active, min interval not met, max daily duration reached");
+    } else {
+        ESP_LOGE(TAG, "Irrigation command failed: %s - %s", cmd_names[command], esp_err_to_name(ret));
     }
 }
 
@@ -254,6 +301,31 @@ void app_main(void)
     ESP_LOGI(TAG, "Inicializando cliente MQTT...");
     ESP_ERROR_CHECK(mqtt_client_init());
 
+    // Inicializar controlador de riego (Phase 5)
+    ESP_LOGI(TAG, "Inicializando controlador de riego...");
+    irrigation_controller_config_t irrig_cfg = IRRIGATION_CONTROLLER_DEFAULT_CONFIG();
+    ret = irrigation_controller_init(&irrig_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al inicializar irrigation_controller: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "WARNING: Sistema continuará sin control de riego automático");
+    } else {
+        ESP_LOGI(TAG, "Irrigation controller inicializado correctamente");
+        ESP_LOGI(TAG, "  - Soil threshold: %.1f%% (start) / %.1f%% (stop)",
+                 irrig_cfg.soil_threshold_critical, irrig_cfg.soil_threshold_optimal);
+        ESP_LOGI(TAG, "  - Max duration: %d minutes", irrig_cfg.max_duration_minutes);
+        ESP_LOGI(TAG, "  - Evaluation: 60s (online) / 2h (offline)");
+    }
+
+    // Registrar callback para comandos MQTT de riego
+    ESP_LOGI(TAG, "Registrando callback de comandos MQTT para riego...");
+    ret = mqtt_client_register_command_callback(mqtt_irrigation_command_handler, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "No se pudo registrar callback MQTT: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "Control remoto de riego NO disponible (solo modo automático)");
+    } else {
+        ESP_LOGI(TAG, "Callback MQTT registrado - control remoto de riego ACTIVO");
+    }
+
     // 3. Creación de tareas de aplicación
     ESP_LOGI(TAG, "Creando tareas de aplicación...");
 
@@ -279,6 +351,16 @@ void app_main(void)
     // 4. Mensaje de inicialización completa
     ESP_LOGI(TAG, "==============================================");
     ESP_LOGI(TAG, "Sistema inicializado correctamente");
+    ESP_LOGI(TAG, "Componentes activos:");
+    ESP_LOGI(TAG, "  - WiFi manager: OK");
+    ESP_LOGI(TAG, "  - MQTT client: OK");
+    ESP_LOGI(TAG, "  - HTTP server: Deferred (will start after IP obtained)");
+    ESP_LOGI(TAG, "  - Sensor reader: OK");
+    // Check irrigation controller status (if init succeeded, state won't be uninitialized)
+    irrigation_controller_status_t irrig_status;
+    bool irrig_ok = (irrigation_controller_get_status(&irrig_status) == ESP_OK);
+    ESP_LOGI(TAG, "  - Irrigation controller: %s",
+             irrig_ok ? "OK (automatic + remote control)" : "DISABLED");
     ESP_LOGI(TAG, "Memoria libre: %" PRIu32 " bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "==============================================");
 

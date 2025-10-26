@@ -8,6 +8,7 @@ idf_component_register(
         mqtt_client         # Migrated from mqtt_adapter
         sensor_reader       # Migrated component - unified sensor interface
         device_config       # Migrated component - configuration management
+        irrigation_controller # Phase 5 - Irrigation control logic
 
         # ESP-IDF components
         nvs_flash

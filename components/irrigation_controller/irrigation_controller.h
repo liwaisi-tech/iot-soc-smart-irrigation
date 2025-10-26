@@ -414,12 +414,14 @@ typedef enum {
 /**
  * @brief Default irrigation controller configuration (Colombian dataset)
  */
+// Note: Use irrigation_controller_init(NULL) to get Kconfig-based defaults
+// The DEFAULT_CONFIG macro below is deprecated in favor of Kconfig
 #define IRRIGATION_CONTROLLER_DEFAULT_CONFIG() {    \
-    .soil_threshold_critical = THRESHOLD_SOIL_CRITICAL,     \
-    .soil_threshold_optimal = THRESHOLD_SOIL_OPTIMAL,       \
-    .soil_threshold_max = THRESHOLD_SOIL_MAX,               \
-    .temp_critical = THRESHOLD_TEMP_CRITICAL,               \
-    .temp_thermal_stop = THRESHOLD_TEMP_THERMAL_STOP,       \
+    .soil_threshold_critical = 51.0f,               \
+    .soil_threshold_optimal = 70.0f,                \
+    .soil_threshold_max = 80.0f,                    \
+    .temp_critical = 32.0f,                         \
+    .temp_thermal_stop = 40.0f,                     \
     .max_duration_minutes = MAX_IRRIGATION_DURATION_MIN,    \
     .min_interval_minutes = MIN_IRRIGATION_INTERVAL_MIN,    \
     .max_daily_minutes = MAX_DAILY_IRRIGATION_MIN,          \

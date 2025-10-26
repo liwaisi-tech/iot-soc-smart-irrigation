@@ -24,6 +24,7 @@
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "cJSON.h"
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
@@ -212,24 +213,83 @@ static void irrigation_evaluation_task(void *param)
 /**
  * @brief Get default configuration
  *
- * Returns default configuration using common_types constants
+ * Returns default configuration using Kconfig values (from menuconfig/sdkconfig)
+ * with fallbacks to sensible defaults if not configured.
+ *
+ * Configuration hierarchy:
+ * 1. CONFIG_IRRIGATION_* from sdkconfig.h (menuconfig values)
+ * 2. Fallback values if not defined
  */
 static irrigation_controller_config_t _get_default_config(void)
 {
     return (irrigation_controller_config_t){
-        .soil_threshold_critical = THRESHOLD_SOIL_CRITICAL,
-        .soil_threshold_optimal = THRESHOLD_SOIL_OPTIMAL,
-        .soil_threshold_max = THRESHOLD_SOIL_MAX,
-        .temp_critical = THRESHOLD_TEMP_CRITICAL,
-        .temp_thermal_stop = THRESHOLD_TEMP_THERMAL_STOP,
-        .max_duration_minutes = MAX_IRRIGATION_DURATION_MIN,
-        .min_interval_minutes = MIN_IRRIGATION_INTERVAL_MIN,
-        .max_daily_minutes = MAX_DAILY_IRRIGATION_MIN,
+        // Soil moisture thresholds - from Kconfig (menuconfig)
+        #ifdef CONFIG_IRRIGATION_SOIL_THRESHOLD_START
+            .soil_threshold_critical = (float)CONFIG_IRRIGATION_SOIL_THRESHOLD_START,
+        #else
+            .soil_threshold_critical = 51.0f,  // Fallback: Colombian dataset default
+        #endif
+
+        #ifdef CONFIG_IRRIGATION_SOIL_THRESHOLD_STOP
+            .soil_threshold_optimal = (float)CONFIG_IRRIGATION_SOIL_THRESHOLD_STOP,
+        #else
+            .soil_threshold_optimal = 70.0f,  // Fallback: Healthy soil level
+        #endif
+
+        #ifdef CONFIG_IRRIGATION_SOIL_THRESHOLD_DANGER
+            .soil_threshold_max = (float)CONFIG_IRRIGATION_SOIL_THRESHOLD_DANGER,
+        #else
+            .soil_threshold_max = 80.0f,  // Fallback: Over-irrigation protection
+        #endif
+
+        // Temperature thresholds - from Kconfig
+        #ifdef CONFIG_IRRIGATION_TEMP_CRITICAL_CELSIUS
+            .temp_critical = (float)CONFIG_IRRIGATION_TEMP_CRITICAL_CELSIUS,
+        #else
+            .temp_critical = 32.0f,  // Fallback: Warning level
+        #endif
+
+        #ifdef CONFIG_IRRIGATION_TEMP_CRITICAL_CELSIUS
+            .temp_thermal_stop = (float)CONFIG_IRRIGATION_TEMP_CRITICAL_CELSIUS,
+        #else
+            .temp_thermal_stop = 40.0f,  // Fallback: Thermal protection
+        #endif
+
+        // Safety limits - from Kconfig
+        #ifdef CONFIG_IRRIGATION_MAX_DURATION_MINUTES
+            .max_duration_minutes = CONFIG_IRRIGATION_MAX_DURATION_MINUTES,
+        #else
+            .max_duration_minutes = 120,  // Fallback: 2 hours
+        #endif
+
+        #ifdef CONFIG_IRRIGATION_MIN_INTERVAL_MINUTES
+            .min_interval_minutes = CONFIG_IRRIGATION_MIN_INTERVAL_MINUTES,
+        #else
+            .min_interval_minutes = 240,  // Fallback: 4 hours
+        #endif
+
+        // Max daily irrigation (no Kconfig yet, using hardcoded)
+        .max_daily_minutes = MAX_DAILY_IRRIGATION_MIN,  // 360 minutes (6 hours)
+
+        // Valve configuration
         .valve_gpio_1 = GPIO_VALVE_1,
         .valve_gpio_2 = GPIO_VALVE_2,
         .primary_valve = 1,
-        .enable_offline_mode = true,
-        .offline_timeout_seconds = 300,
+
+        // Offline mode configuration - from Kconfig
+        #ifdef CONFIG_IRRIGATION_ENABLE_OFFLINE_MODE
+            .enable_offline_mode = (bool)CONFIG_IRRIGATION_ENABLE_OFFLINE_MODE,
+        #else
+            .enable_offline_mode = true,
+        #endif
+
+        #ifdef CONFIG_IRRIGATION_OFFLINE_TIMEOUT_SECONDS
+            .offline_timeout_seconds = CONFIG_IRRIGATION_OFFLINE_TIMEOUT_SECONDS,
+        #else
+            .offline_timeout_seconds = 300,  // Fallback: 5 minutes
+        #endif
+
+        // Offline adaptive thresholds (from common_types as fallback)
         .offline_warning_threshold = 50.0f,
         .offline_critical_threshold = 40.0f,
         .offline_emergency_threshold = 30.0f
@@ -270,8 +330,14 @@ static void send_n8n_webhook(const char* event_type,
     }
 
     // Create HTTP client
+    #ifdef CONFIG_IRRIGATION_N8N_WEBHOOK_URL
+        #define N8N_WEBHOOK_URL CONFIG_IRRIGATION_N8N_WEBHOOK_URL
+    #else
+        #define N8N_WEBHOOK_URL "http://192.168.1.177:5678/webhook/irrigation-events"
+    #endif
+
     esp_http_client_config_t config = {
-        .url = "http://192.168.1.41:5678/webhook-test/irrigation-events",
+        .url = N8N_WEBHOOK_URL,
         .method = HTTP_METHOD_POST,
     };
 
