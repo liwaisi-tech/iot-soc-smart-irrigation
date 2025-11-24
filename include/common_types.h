@@ -232,12 +232,9 @@ typedef struct {
 
 /* ============================ CONSTANTS ============================ */
 
-// Irrigation thresholds (based on Colombian dataset)
-#define THRESHOLD_SOIL_CRITICAL         30.0f   ///< Emergency irrigation (%)
-#define THRESHOLD_SOIL_OPTIMAL          75.0f   ///< Normal stop point (%)
-#define THRESHOLD_SOIL_MAX              80.0f   ///< Over-irrigation alarm (%)
-#define THRESHOLD_TEMP_CRITICAL         32.0f   ///< Critical temperature (°C)
-#define THRESHOLD_TEMP_THERMAL_STOP     40.0f   ///< Thermal protection trigger (°C)
+// Irrigation thresholds are now configured via Kconfig (menuconfig)
+// See: components/irrigation_controller/Kconfig
+// Previous hardcoded values moved to irrigation_controller via _get_default_config()
 #define THRESHOLD_HUMIDITY_OPTIMAL      60.0f   ///< Optimal ambient humidity (%)
 
 // Safety limits

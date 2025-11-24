@@ -25,8 +25,8 @@ static bool adc_initialized = false;
 //                 Values will be stored in NVS for persistence across reboots
 // ============================================================================
 
-#define VALUE_WHEN_DRY_CAP 2865  // Capacitive sensor in dry soil (air reading)
-#define VALUE_WHEN_WET_CAP 1220  // Capacitive sensor in wet soil (water reading)
+#define VALUE_WHEN_DRY_CAP 3710  // Capacitive sensor in dry soil (air reading)
+#define VALUE_WHEN_WET_CAP 1837  // Capacitive sensor in wet soil (water reading)
 #define VALUE_WHEN_DRY_YL 3096   // YL-69 sensor in dry soil
 #define VALUE_WHEN_WET_YL 800    // YL-69 sensor in wet soil
 #define HUMIDITY_MAX 100

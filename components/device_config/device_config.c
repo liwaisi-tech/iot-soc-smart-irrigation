@@ -17,6 +17,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_mac.h"
+#include "sdkconfig.h"
 #include <string.h>
 #include <time.h>
 
@@ -387,10 +388,21 @@ esp_err_t device_config_get_all(system_config_t* config)
     device_config_get_mqtt_port(&config->mqtt_port);
     device_config_get_mqtt_client_id(config->mqtt_client_id, sizeof(config->mqtt_client_id));
 
-    // Irrigation config
+    // Irrigation config (from Kconfig with fallbacks)
     device_config_get_soil_threshold(&config->soil_threshold_critical);
-    config->soil_threshold_optimal = THRESHOLD_SOIL_OPTIMAL;
-    config->soil_threshold_max = THRESHOLD_SOIL_MAX;
+
+    #ifdef CONFIG_IRRIGATION_SOIL_THRESHOLD_STOP
+        config->soil_threshold_optimal = (float)CONFIG_IRRIGATION_SOIL_THRESHOLD_STOP;
+    #else
+        config->soil_threshold_optimal = 70.0f;  // Fallback: Healthy soil level
+    #endif
+
+    #ifdef CONFIG_IRRIGATION_SOIL_THRESHOLD_DANGER
+        config->soil_threshold_max = (float)CONFIG_IRRIGATION_SOIL_THRESHOLD_DANGER;
+    #else
+        config->soil_threshold_max = 80.0f;  // Fallback: Over-irrigation protection
+    #endif
+
     device_config_get_max_irrigation_duration(&config->max_duration_minutes);
     config->min_interval_minutes = MIN_IRRIGATION_INTERVAL_MIN;
 
@@ -398,8 +410,12 @@ esp_err_t device_config_get_all(system_config_t* config)
     device_config_get_soil_sensor_count(&config->soil_sensor_count);
     device_config_get_reading_interval(&config->reading_interval_sec);
 
-    // Safety config
-    config->thermal_protection_temp = THRESHOLD_TEMP_THERMAL_STOP;
+    // Safety config (from Kconfig with fallback)
+    #ifdef CONFIG_IRRIGATION_TEMP_CRITICAL_CELSIUS
+        config->thermal_protection_temp = (float)CONFIG_IRRIGATION_TEMP_CRITICAL_CELSIUS;
+    #else
+        config->thermal_protection_temp = 40.0f;  // Fallback: Thermal protection
+    #endif
     config->enable_offline_mode = true;
 
     ESP_LOGD(TAG, "Retrieved complete configuration");

@@ -340,10 +340,14 @@ static void connection_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
 
+        // Read SSID under spinlock, then log outside critical section
+        char ssid_copy[33] = {0};
         portENTER_CRITICAL(&s_conn_manager_spinlock);
-        ESP_LOGD(TAG, "Connected to WiFi network: '%s'", s_conn_manager.ssid);
+        strncpy(ssid_copy, s_conn_manager.ssid, sizeof(ssid_copy) - 1);
         portEXIT_CRITICAL(&s_conn_manager_spinlock);
 
+        // Log outside critical section to avoid deadlock
+        ESP_LOGD(TAG, "Connected to WiFi network: '%s'", ssid_copy);
         ESP_LOGD(TAG, "Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
 
         portENTER_CRITICAL(&s_conn_manager_spinlock);

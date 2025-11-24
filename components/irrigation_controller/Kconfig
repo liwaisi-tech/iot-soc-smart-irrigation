@@ -1,0 +1,111 @@
+menu "Irrigation Controller Configuration"
+
+    config IRRIGATION_SOIL_THRESHOLD_START
+        int "Soil moisture threshold start (%)"
+        default 51
+        range 30 70
+        help
+            Irrigation starts when soil humidity average drops below this level.
+            Colombian dataset optimized: 51% (typical dry soil warning)
+
+    config IRRIGATION_SOIL_THRESHOLD_STOP
+        int "Soil moisture threshold stop (%)"
+        default 70
+        range 50 85
+        help
+            Irrigation stops when all sensors reach this level.
+            Colombian dataset optimized: 70-75% (healthy soil moisture)
+
+    config IRRIGATION_SOIL_THRESHOLD_DANGER
+        int "Soil moisture danger level (%)"
+        default 80
+        range 70 95
+        help
+            Immediate stop if any sensor exceeds this level (over-irrigation protection).
+            Colombian dataset optimized: 80% (saturated soil - stop immediately)
+
+    config IRRIGATION_MAX_DURATION_MINUTES
+        int "Max irrigation duration (minutes)"
+        default 120
+        range 30 180
+        help
+            Safety limit - stops after this time even if humidity not reached.
+            Default: 120 minutes (2 hours) - Phase 5 limit
+
+    config IRRIGATION_MIN_INTERVAL_MINUTES
+        int "Min interval between sessions (minutes)"
+        default 240
+        range 60 480
+        help
+            Prevents irrigation from restarting within N minutes.
+            Default: 240 minutes (4 hours) - minimum rest period
+
+    config IRRIGATION_VALVE_TIMEOUT_MINUTES
+        int "Valve timeout alert (minutes)"
+        default 40
+        range 20 60
+        help
+            Alert to N8N if valve open longer than this time.
+            Does NOT stop irrigation, only sends notification.
+            Default: 40 minutes
+
+    config IRRIGATION_OFFLINE_INTERVAL_HOURS
+        int "Offline mode evaluation interval (hours)"
+        default 2
+        range 1 6
+        help
+            Check sensors every N hours when WiFi/MQTT offline.
+            Default: 2 hours (normal offline mode)
+            Phase 6 will add adaptive levels (30min, 15min for critical)
+
+    config IRRIGATION_N8N_WEBHOOK_URL
+        string "N8N Webhook URL"
+        default "http://192.168.1.177:5678/webhook/irrigation-events"
+        help
+            URL where irrigation events are sent for notifications.
+            Events: IRRIGATION_STARTED, IRRIGATION_STOPPED, SENSOR_ERROR, VALVE_TIMEOUT, TEMPERATURE_CRITICAL
+
+    config IRRIGATION_ENABLE_MQTT_OVERRIDE
+        bool "Enable MQTT command override"
+        default y
+        help
+            Allow remote start/stop via MQTT commands.
+            Topic: irrigation/control/{mac_address}
+            Payload: "start" or "stop"
+
+    config IRRIGATION_VALVE_LED_GPIO
+        int "Valve LED GPIO (Phase 5 simulator)"
+        default 21
+        range 0 39
+        help
+            GPIO for LED simulator (Phase 5 testing).
+            Phase 5: GPIO 21 (safe, not boot-related)
+            Phase 6: Switch to GPIO 2 for relay module
+            Default: 21 (LED simulator)
+
+    config IRRIGATION_TEMP_CRITICAL_CELSIUS
+        int "Critical temperature threshold (°C)"
+        default 40
+        range 30 50
+        help
+            Auto-stop irrigation if temperature exceeds this.
+            Default: 40°C (thermal protection trigger)
+            Colombian climate: rainy season 28-32°C, dry season 32-35°C, max 40°C
+
+    config IRRIGATION_ENABLE_OFFLINE_MODE
+        bool "Enable offline irrigation mode"
+        default y
+        help
+            Allow automatic irrigation when WiFi/MQTT offline.
+            Phase 5: 2-hour fixed intervals
+            Phase 6: Adaptive intervals (Normal/Warning/Critical/Emergency)
+
+    config IRRIGATION_OFFLINE_TIMEOUT_SECONDS
+        int "Offline mode activation timeout (seconds)"
+        default 300
+        range 60 600
+        help
+            Switch to offline mode if no WiFi/MQTT for N seconds.
+            Default: 300 seconds (5 minutes)
+
+endmenu

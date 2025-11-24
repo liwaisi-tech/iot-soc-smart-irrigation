@@ -1,0 +1,42 @@
+menu "Notification Service Configuration"
+
+    config NOTIFICATION_VERIFY_WIFI
+        bool "Verify WiFi before sending notifications"
+        default y
+        help
+            If enabled, notification service will verify WiFi connectivity before
+            sending webhooks. This prevents wasting resources on failed HTTP requests
+            when device is offline.
+
+            If disabled, notification service will attempt to send regardless of WiFi
+            status and let the HTTP client fail naturally.
+
+    config NOTIFICATION_N8N_WEBHOOK_URL
+        string "N8N Webhook URL"
+        default "http://192.168.1.177:5678/webhook/irrigation-events"
+        help
+            HTTP endpoint URL for N8N webhooks. Configure your N8N instance URL here.
+
+            Example: http://192.168.1.177:5678/webhook/irrigation-events
+
+            This URL receives POST requests with irrigation event data in JSON format.
+
+    config NOTIFICATION_N8N_API_KEY
+        string "N8N API Key"
+        default "d1b4873f5144c6db6c87f03109010c314a7fb9edf3052f4f478bb2d967181427"
+        help
+            API key for N8N webhook authentication.
+
+            Sent as X-API-Key header in webhook requests.
+
+            WARNING: Keep this key secure and do not commit to public repositories.
+            Consider using environment-specific configurations.
+
+    config NOTIFICATION_ENABLE_STATS
+        bool "Enable notification statistics"
+        default y
+        help
+            If enabled, notification service will track send and error counters.
+            Useful for monitoring notification reliability.
+
+endmenu
