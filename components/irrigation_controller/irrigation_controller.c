@@ -72,6 +72,9 @@ typedef struct {
     // Last evaluation
     irrigation_evaluation_t last_evaluation;
     time_t last_eval_time;
+
+    // Startup stabilization
+    uint8_t startup_cycles_remaining;  ///< Remaining startup cycles (10 cycles at 60s for stabilization)
 } irrigation_controller_context_t;
 
 /* ============================ PRIVATE STATE ============================ */
@@ -91,7 +94,8 @@ static irrigation_controller_context_t s_irrig_ctx = {
     .total_runtime_today_sec = 0,
     .is_online = false,
     .safety_lock = false,
-    .thermal_protection_active = false
+    .thermal_protection_active = false,
+    .startup_cycles_remaining = 10  // First 10 cycles at 60s for stabilization
 };
 
 /**
@@ -121,14 +125,20 @@ static void irrigation_state_thermal_stop_handler(const sensor_reading_t* readin
  * @brief Irrigation evaluation task
  *
  * Main task loop for periodic irrigation evaluation.
- * Runs every 60 seconds in online mode, 2 hours in offline mode.
+ * Interval logic:
+ * - Online mode: 60 seconds (always)
+ * - Offline mode: 60 seconds for first 10 cycles (startup stabilization), then 2 hours
  * Implements complete state machine with sensor integration.
  */
 static void irrigation_evaluation_task(void *param)
 {
     ESP_LOGI(TAG, "Irrigation evaluation task started");
+    uint32_t cycle_count = 0;
 
     while (1) {
+        cycle_count++;
+        ESP_LOGI(TAG, "=== Irrigation evaluation cycle #%" PRIu32 " ===", cycle_count);
+        
         // 1. Detect connectivity status
         bool is_online = wifi_manager_is_connected();
 
@@ -187,25 +197,77 @@ static void irrigation_evaluation_task(void *param)
             }
         }
 
-        // 4. Determine evaluation interval based on connectivity
+        // 4. Determine evaluation interval based on connectivity and startup state
         uint32_t eval_interval_ms;
+        uint8_t startup_cycles;
+        
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            startup_cycles = s_irrig_ctx.startup_cycles_remaining;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+        
         if (is_online) {
             eval_interval_ms = 60000;  // 60 seconds online
             ESP_LOGD(TAG, "Online mode - next evaluation in 60s");
         } else {
-            eval_interval_ms = 7200000;  // 2 hours offline (Phase 5 fixed interval)
-            ESP_LOGD(TAG, "Offline mode - next evaluation in 2h");
+            // Offline mode: Use 60s for first 10 cycles (startup stabilization)
+            // Then switch to 2h intervals
+            if (startup_cycles > 0) {
+                eval_interval_ms = 60000;  // 60 seconds during startup
+                ESP_LOGI(TAG, "Offline mode - STARTUP: cycle %d/10, next evaluation in 60s", 
+                         11 - startup_cycles);
+                
+                // Decrement startup counter (only when offline)
+                portENTER_CRITICAL(&s_irrigation_spinlock);
+                {
+                    s_irrig_ctx.startup_cycles_remaining--;
+                }
+                portEXIT_CRITICAL(&s_irrigation_spinlock);
+            } else {
+                eval_interval_ms = 7200000;  // 2 hours offline (normal operation)
+                ESP_LOGD(TAG, "Offline mode - normal operation, next evaluation in 2h");
+            }
         }
 
-        // 5. Log summary
-        ESP_LOGD(TAG, "Evaluation cycle: State=%d, Valve=%s, Online=%d, NextWait=%lums",
-                 s_irrig_ctx.current_state,
-                 s_irrig_ctx.is_valve_open ? "OPEN" : "CLOSED",
+        // 5. Log summary (INFO level for visibility)
+        irrigation_state_t current_state_log;
+        bool is_valve_open_log;
+        portENTER_CRITICAL(&s_irrigation_spinlock);
+        {
+            current_state_log = s_irrig_ctx.current_state;
+            is_valve_open_log = s_irrig_ctx.is_valve_open;
+        }
+        portEXIT_CRITICAL(&s_irrigation_spinlock);
+        
+        ESP_LOGI(TAG, "Evaluation cycle: State=%d, Valve=%s, Online=%d, StartupCycles=%d, NextWait=%" PRIu32 "ms",
+                 current_state_log,
+                 is_valve_open_log ? "OPEN" : "CLOSED",
                  is_online,
+                 startup_cycles,
                  eval_interval_ms);
 
-        // 6. Wait for next evaluation
-        vTaskDelay(pdMS_TO_TICKS(eval_interval_ms));
+        // 6. Wait for next evaluation with periodic WiFi check
+        // If offline, check WiFi every 10 seconds to detect reconnection quickly
+        if (!is_online) {
+            // Break long delay into smaller chunks to check WiFi status
+            uint32_t check_interval_ms = 10000;  // Check every 10 seconds
+            uint32_t remaining_ms = eval_interval_ms;
+            
+            while (remaining_ms > 0 && !wifi_manager_is_connected()) {
+                uint32_t delay_ms = (remaining_ms > check_interval_ms) ? check_interval_ms : remaining_ms;
+                vTaskDelay(pdMS_TO_TICKS(delay_ms));
+                remaining_ms -= delay_ms;
+            }
+            
+            // If WiFi reconnected during wait, log it
+            if (wifi_manager_is_connected()) {
+                ESP_LOGI(TAG, "WiFi reconnected during wait - switching to online mode");
+            }
+        } else {
+            // Online mode: simple delay
+            vTaskDelay(pdMS_TO_TICKS(eval_interval_ms));
+        }
     }
 }
 
@@ -312,12 +374,17 @@ static void irrigation_state_idle_handler(const sensor_reading_t* reading)
                       reading->soil.soil_humidity[1] +
                       reading->soil.soil_humidity[2]) / 3.0f;
 
-    ESP_LOGD(TAG, "IDLE state: soil_avg=%.1f%% (start threshold=%.1f%%)",
-             soil_avg, s_irrig_ctx.config.soil_threshold_critical);
+    // Log at INFO level for visibility
+    ESP_LOGI(TAG, "IDLE state: soil_avg=%.1f%% (sensors: %.1f%%, %.1f%%, %.1f%%) - threshold=%.1f%%",
+             soil_avg, 
+             reading->soil.soil_humidity[0],
+             reading->soil.soil_humidity[1],
+             reading->soil.soil_humidity[2],
+             s_irrig_ctx.config.soil_threshold_critical);
 
-    // Check if should start irrigation
-    if (soil_avg < s_irrig_ctx.config.soil_threshold_critical) {
-        ESP_LOGI(TAG, "Soil too dry (%.1f%% < %.1f%%) - starting irrigation",
+    // Check if should start irrigation (<= to include threshold value)
+    if (soil_avg <= s_irrig_ctx.config.soil_threshold_critical) {
+        ESP_LOGI(TAG, "Soil too dry (%.1f%% <= %.1f%%) - starting irrigation",
                  soil_avg, s_irrig_ctx.config.soil_threshold_critical);
 
         // Open valve
@@ -519,6 +586,8 @@ static void irrigation_state_thermal_stop_handler(const sensor_reading_t* readin
 
 esp_err_t irrigation_controller_init(const irrigation_controller_config_t* config)
 {
+    ESP_LOGI(TAG, "=== irrigation_controller_init() CALLED ===");
+    
     if (is_initialized) {
         ESP_LOGW(TAG, "Irrigation controller already initialized");
         return ESP_OK;
@@ -527,27 +596,36 @@ esp_err_t irrigation_controller_init(const irrigation_controller_config_t* confi
     ESP_LOGI(TAG, "Initializing irrigation controller");
 
     // Initialize valve driver
+    ESP_LOGI(TAG, "Step 1: Initializing valve driver...");
     esp_err_t ret = valve_driver_init();
+    ESP_LOGI(TAG, "valve_driver_init() returned: %s (code: %d)", esp_err_to_name(ret), ret);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize valve driver: %s", esp_err_to_name(ret));
         return ret;
     }
+    ESP_LOGI(TAG, "Step 1: Valve driver initialized OK");
 
     // Initialize safety watchdog
+    ESP_LOGI(TAG, "Step 2: Initializing safety watchdog...");
     ret = safety_watchdog_init();
+    ESP_LOGI(TAG, "safety_watchdog_init() returned: %s (code: %d)", esp_err_to_name(ret), ret);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize safety watchdog: %s", esp_err_to_name(ret));
         valve_driver_deinit();
         return ret;
     }
+    ESP_LOGI(TAG, "Step 2: Safety watchdog initialized OK");
 
     // Initialize offline mode driver
+    ESP_LOGI(TAG, "Step 3: Initializing offline mode driver...");
     ret = offline_mode_init();
+    ESP_LOGI(TAG, "offline_mode_init() returned: %s (code: %d)", esp_err_to_name(ret), ret);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize offline mode driver: %s", esp_err_to_name(ret));
         valve_driver_deinit();
         return ret;
     }
+    ESP_LOGI(TAG, "Step 3: Offline mode driver initialized OK");
 
     // Set configuration
     if (config != NULL) {
@@ -564,9 +642,18 @@ esp_err_t irrigation_controller_init(const irrigation_controller_config_t* confi
         portEXIT_CRITICAL(&s_irrigation_spinlock);
     }
 
+    // Initialize startup cycles counter (10 cycles at 60s for stabilization when offline)
+    portENTER_CRITICAL(&s_irrigation_spinlock);
+    {
+        s_irrig_ctx.startup_cycles_remaining = 10;
+    }
+    portEXIT_CRITICAL(&s_irrigation_spinlock);
+    ESP_LOGI(TAG, "Startup stabilization: 10 cycles at 60s when offline");
+
     is_initialized = true;
 
     // Create evaluation task
+    ESP_LOGI(TAG, "Step 4: Creating irrigation evaluation task...");
     BaseType_t task_ret = xTaskCreatePinnedToCore(
         irrigation_evaluation_task,
         "irrigation_task",
@@ -576,12 +663,15 @@ esp_err_t irrigation_controller_init(const irrigation_controller_config_t* confi
         &s_irrigation_task_handle,
         1   // Core 1
     );
+    ESP_LOGI(TAG, "xTaskCreatePinnedToCore() returned: %s (handle: %p)", 
+             (task_ret == pdPASS) ? "pdPASS" : "pdFAIL", s_irrigation_task_handle);
 
     if (task_ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create irrigation evaluation task");
         valve_driver_deinit();
         return ESP_ERR_NO_MEM;
     }
+    ESP_LOGI(TAG, "Step 4: Irrigation evaluation task created successfully");
 
     ESP_LOGI(TAG, "Irrigation controller initialized");
     ESP_LOGI(TAG, "  Soil threshold: %.1f%% start, %.1f%% stop",

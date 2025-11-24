@@ -318,13 +318,9 @@ void app_main(void)
     ret = irrigation_controller_init(&irrig_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Error al inicializar irrigation_controller: %s", esp_err_to_name(ret));
-        ESP_LOGE(TAG, "WARNING: Sistema continuará sin control de riego automático");
+        ESP_LOGW(TAG, "Sistema continuará sin control de riego automático");
     } else {
         ESP_LOGI(TAG, "Irrigation controller inicializado correctamente");
-        ESP_LOGI(TAG, "  - Soil threshold: %.1f%% (start) / %.1f%% (stop)",
-                 irrig_cfg.soil_threshold_critical, irrig_cfg.soil_threshold_optimal);
-        ESP_LOGI(TAG, "  - Max duration: %d minutes", irrig_cfg.max_duration_minutes);
-        ESP_LOGI(TAG, "  - Evaluation: 60s (online) / 2h (offline)");
     }
 
     // Registrar callback para comandos MQTT de riego
@@ -338,10 +334,6 @@ void app_main(void)
     }
 
     // 3. Creación de tareas de aplicación
-    ESP_LOGI(TAG, "Creando tareas de aplicación...");
-
-    // Crear tarea de publicación de sensores
-    ESP_LOGI(TAG, "Creando tarea de publicación de sensores...");
     BaseType_t task_ret = xTaskCreatePinnedToCore(
         sensor_publishing_task,                 // Task function
         "sensor_publish",                       // Task name
@@ -355,8 +347,6 @@ void app_main(void)
     if (task_ret != pdPASS) {
         ESP_LOGE(TAG, "Error al crear tarea de publicación de sensores");
         ESP_ERROR_CHECK(ESP_FAIL); // This will cause a restart
-    } else {
-        ESP_LOGI(TAG, "Tarea de publicación de sensores creada correctamente");
     }
 
     // 4. Mensaje de inicialización completa
@@ -378,7 +368,5 @@ void app_main(void)
     // 5. Loop principal - mantener el sistema funcionando
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000)); // 10 segundos
-        ESP_LOGI(TAG, "Sistema funcionando - Memoria libre: %" PRIu32 " bytes", 
-                esp_get_free_heap_size());
     }
 }
